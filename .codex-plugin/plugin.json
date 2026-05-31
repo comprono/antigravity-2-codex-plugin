@@ -1,0 +1,35 @@
+{
+  "name": "antigravity-2",
+  "version": "0.1.0+codex.20260531195756",
+  "description": "Codex helpers for opening, inspecting, and automating a local Antigravity 2.0 desktop app.",
+  "author": {
+    "name": "comprono"
+  },
+  "keywords": [
+    "antigravity",
+    "desktop",
+    "local"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Antigravity 2.0",
+    "shortDescription": "Connect Codex to a local Antigravity desktop app.",
+    "longDescription": "Adds Codex-side helpers for Antigravity 2.0 on Windows. The plugin can launch the desktop app, report install and process status, connect to the app's Chromium DevTools endpoint when available, inspect visible projects and chats, and hand off instructions into an existing Antigravity conversation.",
+    "developerName": "comprono",
+    "category": "Productivity",
+    "capabilities": [
+      "Local app launch",
+      "Install inspection",
+      "DevTools bridge",
+      "Project and chat inspection",
+      "Automation handoff"
+    ],
+    "defaultPrompt": [
+      "Open Antigravity 2.0",
+      "Inspect Antigravity projects",
+      "Continue an Antigravity chat"
+    ],
+    "brandColor": "#14B8A6"
+  }
+}
