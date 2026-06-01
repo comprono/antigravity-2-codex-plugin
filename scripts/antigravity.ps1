@@ -1,6 +1,6 @@
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("status", "open", "inspect", "path", "models")]
+  [ValidateSet("status", "open", "inspect", "path", "models", "limits", "live", "setup", "doctor", "privacy")]
   [string] $Command = "status"
 )
 
@@ -10,6 +10,7 @@ $installRoot = Join-Path $env:LOCALAPPDATA "Programs\Antigravity"
 $exePath = Join-Path $installRoot "Antigravity.exe"
 $userDataPath = Join-Path $env:APPDATA "Antigravity"
 $devToolsPortFile = Join-Path $userDataPath "DevToolsActivePort"
+$repoRoot = Split-Path -Parent $PSScriptRoot
 
 function Get-AntigravityProcess {
   Get-Process -Name "Antigravity" -ErrorAction SilentlyContinue
@@ -23,6 +24,19 @@ function Get-DevToolsPort {
     }
   }
   return $null
+}
+
+function Get-DevToolsPages {
+  $port = Get-DevToolsPort
+  if (-not $port) {
+    return @()
+  }
+
+  try {
+    @(Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/list" -TimeoutSec 5 -ErrorAction Stop)
+  } catch {
+    @()
+  }
 }
 
 function Get-LanguageServerProcess {
@@ -159,6 +173,141 @@ function Invoke-AntigravityGrpcJson {
   } finally {
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $previousCallback
   }
+}
+
+function Get-NodeInfo {
+  $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+  if (-not $nodeCommand) {
+    return [PSCustomObject]@{
+      Found = $false
+      Path = $null
+      Version = $null
+    }
+  }
+
+  $version = $null
+  try {
+    $version = (& $nodeCommand.Source --version 2>$null)
+  } catch {
+    $version = $null
+  }
+
+  [PSCustomObject]@{
+    Found = $true
+    Path = $nodeCommand.Source
+    Version = $version
+  }
+}
+
+function Get-SetupReport {
+  $status = Write-Status | ConvertFrom-Json
+  $inspect = $null
+  try {
+    $inspect = & $PSCommandPath inspect | ConvertFrom-Json
+  } catch {
+    $inspect = $null
+  }
+
+  $languageServer = $null
+  if ($status.Running) {
+    try {
+      $ls = Get-LanguageServerInfo
+      $languageServer = [PSCustomObject]@{
+        Running = $true
+        ProcessId = $ls.ProcessId
+        HttpPort = $ls.HttpPort
+        HttpsPort = $ls.HttpsPort
+        HasCsrfToken = [bool]$ls.CsrfToken
+      }
+    } catch {
+      $languageServer = [PSCustomObject]@{
+        Running = $false
+        Error = $_.Exception.Message
+      }
+    }
+  } else {
+    $languageServer = [PSCustomObject]@{
+      Running = $false
+    }
+  }
+
+  $node = Get-NodeInfo
+  $devToolsPages = Get-DevToolsPages
+
+  [PSCustomObject]@{
+    PluginRoot = $repoRoot
+    Installed = $status.Installed
+    AntigravityExe = $status.ExePath
+    AntigravityUserData = $status.UserDataPath
+    AntigravityRunning = $status.Running
+    DevToolsPort = $status.DevToolsPort
+    DevToolsReachable = $devToolsPages.Count -gt 0
+    Node = $node
+    ChromeDevToolsMcpFound = [bool]($inspect -and $inspect.BundledPackageFiles -and $inspect.BundledPackageFiles.Count -gt 0)
+    LanguageServer = $languageServer
+    ReadyForModelLimits = [bool]($languageServer.Running -and $languageServer.HttpsPort -and $languageServer.HasCsrfToken)
+    ReadyForLiveUiInspection = [bool]($status.Running -and $status.DevToolsPort -and $devToolsPages.Count -gt 0)
+  } | ConvertTo-Json -Depth 8
+}
+
+function Get-LiveReport {
+  $status = Write-Status | ConvertFrom-Json
+  $pages = Get-DevToolsPages | ForEach-Object {
+    [PSCustomObject]@{
+      Type = $_.type
+      Title = $_.title
+      Url = $_.url
+      WebSocketDebuggerUrl = $_.webSocketDebuggerUrl
+    }
+  }
+
+  [PSCustomObject]@{
+    Source = "Antigravity Chromium DevTools endpoint"
+    GeneratedAtUtc = [datetime]::UtcNow.ToString("o")
+    Running = $status.Running
+    DevToolsPort = $status.DevToolsPort
+    PageCount = @($pages).Count
+    Pages = @($pages)
+    Note = "Use the DevTools page WebSocket or the antigravity-devtools MCP server for verified live UI inspection and interaction."
+  } | ConvertTo-Json -Depth 8
+}
+
+function Get-PrivacyReport {
+  $patterns = @(
+    "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+    "C:\\Users\\[^\\]+",
+    ("pass" + "word"),
+    ("sec" + "ret"),
+    ("tok" + "en\s*[:=]"),
+    "api[_-]?key",
+    "BEGIN (RSA|OPENSSH|PRIVATE)",
+    "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+  )
+
+  $findings = @()
+  $scanFiles = @(Get-ChildItem -LiteralPath $repoRoot -Recurse -File -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -notmatch "\\.git\\" })
+  foreach ($pattern in $patterns) {
+    $matches = @($scanFiles |
+      Select-String -Pattern $pattern -ErrorAction SilentlyContinue |
+      Where-Object { $_.Line -notmatch "csrfToken|csrf_token|x-codeium-csrf-token" } |
+      Select-Object Path, LineNumber, Pattern)
+    foreach ($match in $matches) {
+      $findings += [PSCustomObject]@{
+        Path = $match.Path
+        LineNumber = $match.LineNumber
+        Pattern = $pattern
+      }
+    }
+  }
+
+  [PSCustomObject]@{
+    Source = "Local repository pattern scan"
+    GeneratedAtUtc = [datetime]::UtcNow.ToString("o")
+    FindingCount = $findings.Count
+    Findings = $findings
+    Note = "Review findings manually before publishing. Runtime CSRF handling in code is expected; actual runtime token values must never be committed."
+  } | ConvertTo-Json -Depth 6
 }
 
 function Convert-QuotaInfo {
@@ -333,5 +482,25 @@ switch ($Command) {
 
   "models" {
     Get-AntigravityModels
+  }
+
+  "limits" {
+    Get-AntigravityModels
+  }
+
+  "live" {
+    Get-LiveReport
+  }
+
+  "setup" {
+    Get-SetupReport
+  }
+
+  "doctor" {
+    Get-SetupReport
+  }
+
+  "privacy" {
+    Get-PrivacyReport
   }
 }

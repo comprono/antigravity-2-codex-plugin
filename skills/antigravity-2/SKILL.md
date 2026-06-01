@@ -1,131 +1,192 @@
 ---
 name: antigravity-2
-description: Connect Codex to a local Antigravity 2.0 desktop app for launch, status checks, project/chat inspection, and safe conversation handoff.
+description: Connect Codex to a local Antigravity 2.0 desktop app for setup checks, model limits, live project/chat inspection, project creation, chat creation, and safe conversation handoff.
 ---
 
 # Antigravity 2.0
 
-Use this skill when the user asks Codex to connect to, open, inspect, compare, or automate the Antigravity 2.0 desktop app installed locally. The most useful jobs are:
+Use this skill when the user asks Codex to connect to, set up, inspect, compare, or automate the local Antigravity 2.0 desktop app.
 
-- Open Antigravity from Codex.
-- Check whether Antigravity is installed and running.
-- Inspect visible Antigravity projects and conversations.
-- Verify the visible chat model before handing off work.
-- Report model quota state from Antigravity's local language server.
-- Post a continuation instruction into an existing Antigravity chat.
-- Use the Chromium DevTools endpoint for app-level inspection when Antigravity exposes one.
+Core jobs:
+
+- Set up or verify the plugin on another Windows machine.
+- Open Antigravity and report install/runtime status.
+- Read model quota and AI credit state from Antigravity's local language server.
+- Inspect what is happening live in Antigravity.
+- See projects and chats through the live UI.
+- Continue an existing chat after verifying the selected project, conversation, and model.
+- Start a new chat in an existing project.
+- Start a new project and then start a chat there.
+- Report quota, model, UI, or submission errors without repeatedly retrying.
 
 ## Requirements
 
 - Windows desktop environment.
 - Antigravity installed at the standard per-user location: `%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe`.
 - Antigravity user data at: `%APPDATA%\Antigravity`.
+- Plugin installed at: `%USERPROFILE%\plugins\antigravity-2`.
 - Node.js available on `PATH` when using the bundled `chrome-devtools-mcp` bridge.
-- Helper script: `%USERPROFILE%\plugins\antigravity-2\scripts\antigravity.ps1`.
 
-The helper scripts compute `%LOCALAPPDATA%`, `%APPDATA%`, and `%USERPROFILE%` at runtime. Do not hardcode another user's home directory when adapting the workflow.
+The helper scripts compute `%LOCALAPPDATA%`, `%APPDATA%`, and `%USERPROFILE%` at runtime. Do not hardcode another user's home directory, ports, project names, chats, email addresses, or runtime tokens.
 
-## Workflow
+## First-Run Setup
 
-1. Check status before assuming the app is running.
+After a user clones the GitHub repo into `%USERPROFILE%\plugins\antigravity-2`, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" setup
+```
+
+Use the setup report to decide the next step:
+
+- If `Installed` is false, ask the user to install Antigravity or provide its install path.
+- If `Node.Found` is false, install or expose Node.js on `PATH` before using the DevTools bridge.
+- If `AntigravityRunning` is false, run the `open` command.
+- If `ReadyForModelLimits` is false after opening Antigravity, wait a few seconds and rerun `setup`.
+- If `ReadyForLiveUiInspection` is false, verify `DevToolsActivePort` and use the Browser/Computer Use fallback only if DevTools cannot connect.
+
+## Helper Commands
+
+Check status:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" status
 ```
 
-The status output reports:
-
-- `Installed`
-- `ExePath`
-- `UserDataPath`
-- `Running`
-- `ProcessIds`
-- `DevToolsPort`
-
-2. Open the installed desktop app when requested.
+Open Antigravity:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" open
 ```
 
-3. Inspect local integration hints.
+Inspect integration details:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" inspect
 ```
 
-The inspect output reports the Antigravity install root, user data path, current DevTools port, bundled `chrome-devtools-mcp` package, and known Antigravity binaries.
+Inspect the live DevTools connection:
 
-4. Report model quota state when requested.
+```powershell
+powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" live
+```
+
+Report model limits:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" models
 ```
 
-The helper discovers the running Antigravity `language_server.exe`, reads its CSRF token from the process command line, finds its local HTTPS gRPC-web port, and calls:
+`limits` is an alias for `models`.
+
+Run the public-repo privacy scanner:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" privacy
+```
+
+## Model Limits
+
+Use `models` or `limits` for model quota checks. The helper discovers the running Antigravity `language_server.exe`, reads its CSRF token from the local process command line, finds its local HTTPS gRPC-web port, and calls:
 
 - `exa.language_server_pb.LanguageServerService/GetAvailableModels`
 - `exa.language_server_pb.LanguageServerService/GetLoadCodeAssist`
 
-Use this path for model quota checks. It is the same local language-server surface the Antigravity Models tab uses and is preferable to reading old chats or logs. The result is per-model quota fraction/reset metadata and AI credit tier data; it is not a raw token ledger unless Antigravity exposes one through these responses.
+This is the same local language-server surface the Antigravity Models tab uses. It returns per-model quota fraction/reset metadata and AI credit tier data when Antigravity exposes it. It is not a raw all-model token ledger unless Antigravity exposes one through these responses.
 
-5. For Codex-to-Antigravity UI inspection, use the plugin MCP server `antigravity-devtools` when available. It starts `chrome-devtools-mcp` from Antigravity's bundled dependencies and connects to the running Electron window through `DevToolsActivePort`.
+Do not parse old chats, task transcripts, or logs for model limits except as supporting evidence after the language-server path fails.
 
-6. If the user asks for the open project or chat context, inspect the live Antigravity page through DevTools or Playwright-over-CDP:
+## Live UI Inspection
+
+For project and chat work, the live UI is the source of truth.
+
+Preferred path:
+
+1. Run `setup` or `live` to confirm DevTools readiness.
+2. Use the plugin MCP server `antigravity-devtools` when available. It starts Antigravity's bundled `chrome-devtools-mcp` and connects through `DevToolsActivePort`.
+3. Inspect the visible UI text and interactive elements through DevTools.
+4. Confirm the project, conversation, composer state, and selected model before sending a message.
+
+Manual DevTools endpoint check:
 
 ```powershell
 $port = (Get-Content "$env:APPDATA\Antigravity\DevToolsActivePort")[0]
 Invoke-RestMethod "http://127.0.0.1:$port/json/list"
 ```
 
-Then connect to the page WebSocket or use Playwright CDP to read the visible body text. Confirm the project name, conversation title, and model from the live UI instead of guessing from storage alone.
+If DevTools cannot interact with a native dialog or OS-level control, use the Computer Use plugin as a fallback.
 
-7. If the user asks to continue a visible Antigravity chat, first verify:
+## Project And Chat Workflows
 
-- The intended project is visible.
-- The intended conversation is visible or selected.
-- The requested model is visible in the composer area.
-- The instruction will be pasted into the correct chat.
+### See Chats In Projects
 
-After verification, post the user's instruction into the composer and submit it. Report whether Antigravity accepted the message, started working, or showed a quota/error state.
+Use DevTools to inspect the live Antigravity project list, selected project, conversation list, and conversation titles. If the UI has a project or conversation search control, use it rather than reading private storage first.
 
-7. If OS-level clicks or native window management are needed, use the Computer Use plugin. DevTools automation can inspect and interact with Chromium-rendered UI, but it does not replace Windows desktop control.
+Storage under `%APPDATA%\Antigravity\User` can support investigation, but live UI remains authoritative.
 
-## Storage Inspection
+### Continue An Existing Chat
 
-Antigravity stores useful state under `%APPDATA%\Antigravity\User`.
+Before submitting:
 
-Useful locations:
+- Verify the intended project is selected.
+- Verify the intended conversation title or visible context.
+- Verify the intended model in the composer.
+- Verify the composer is idle and not already streaming.
+- Check `models` if the user asks about limits or if a quota warning is visible.
 
-- `%APPDATA%\Antigravity\User\globalStorage\storage.json`
-- `%APPDATA%\Antigravity\User\workspaceStorage`
-- `%APPDATA%\Antigravity\User\globalStorage\kilocode.kilo-code\tasks`
+Then paste the user's instruction into the composer and submit it. Report whether Antigravity accepted the message, started working, requested confirmation, or showed a quota/error state.
 
-Use storage only as supporting evidence. The live UI is the source of truth for the currently selected project, conversation, and model.
+### Start A New Chat In An Existing Project
 
-## Public Plugin Notes
+Before submitting:
 
-This plugin is intentionally a local bridge, not a cloud service. People who install it should expect it to operate only on their own machine and their own Antigravity app profile.
+- Select or search for the existing project.
+- Use the UI control for a new chat/conversation.
+- Verify the new composer belongs to that project.
+- Verify the selected model.
 
-When adapting it for another user:
+Then submit the user's initial prompt. Report the new conversation title or visible identifier if Antigravity shows one.
 
-- Keep the plugin folder name as `antigravity-2` unless creating a fork.
-- Replace personal marketplace metadata only if publishing under a different author.
-- Keep scripts based on environment variables, not fixed user paths.
-- Validate the plugin after changes with the plugin-creator validator.
+### Start A New Project
+
+Before creating:
+
+- Ask for a project name only if the user's intended name cannot be inferred.
+- Use the visible Antigravity project creation flow.
+- Select local folders/workspaces only when the user explicitly requests those paths or they are already visible and clearly intended.
+- Avoid broad filesystem access without explicit user instruction.
+
+After creation, verify the project is selected, then start a chat if requested.
+
+### Tell What Is Happening Live
+
+Inspect the active page text and state through DevTools. Summarize:
+
+- selected project,
+- selected conversation,
+- selected model,
+- whether the agent is idle, working, waiting for approval, or blocked,
+- visible quota/errors,
+- last visible meaningful action.
+
+Do not expose unrelated private chat content unless the user asked for that specific context.
+
+## Public Plugin Hygiene
+
+Before committing or publishing:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" privacy
+git diff --check
+```
+
+Also run a local targeted scan for any private terms the current user mentions. Do not commit names, emails, project names, runtime ports, CSRF tokens, OAuth tokens, cookies, logs, screenshots, or Antigravity user data.
 
 ## Boundaries
 
-- This plugin does not replace Antigravity internals or patch the app.
-- Treat Antigravity settings, local storage, and user data as user-owned state. Do not delete or rewrite them unless the user explicitly asks.
-- Do not read sensitive files, credentials, browser cookies, or private chat contents unless the user asks for that specific context.
-- If adding deeper automation later, prefer a small local MCP server that wraps stable public surfaces: a CLI if one exists, a documented local API, or verified DevTools endpoints.
-
-## Troubleshooting
-
-- If `Installed` is false, ask the user to confirm where Antigravity is installed.
-- If `Running` is false, run the `open` command.
-- If `DevToolsPort` is empty, Antigravity may not have exposed a debug endpoint yet. Reopen the app and check `%APPDATA%\Antigravity\DevToolsActivePort`.
-- If DevTools connection fails, verify `http://127.0.0.1:<port>/json/version`.
-- If the chat does not submit, inspect whether the composer is a textarea, contenteditable element, or custom role textbox.
+- This plugin is a local bridge, not a cloud service.
+- It does not patch Antigravity internals.
+- It does not commit runtime language-server tokens.
+- It does not bypass Antigravity quota, billing, authentication, or safety controls.
+- It should not read sensitive files, credentials, browser cookies, or private chat contents unless the user asks for that specific context.
 - If Antigravity reports quota limits, do not keep resubmitting. Report the reset time and prepare the next action plan.
