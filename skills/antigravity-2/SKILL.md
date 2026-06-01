@@ -11,6 +11,7 @@ Use this skill when the user asks Codex to connect to, open, inspect, compare, o
 - Check whether Antigravity is installed and running.
 - Inspect visible Antigravity projects and conversations.
 - Verify the visible chat model before handing off work.
+- Report model quota state from Antigravity's local language server.
 - Post a continuation instruction into an existing Antigravity chat.
 - Use the Chromium DevTools endpoint for app-level inspection when Antigravity exposes one.
 
@@ -55,9 +56,22 @@ powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\an
 
 The inspect output reports the Antigravity install root, user data path, current DevTools port, bundled `chrome-devtools-mcp` package, and known Antigravity binaries.
 
-4. For Codex-to-Antigravity UI inspection, use the plugin MCP server `antigravity-devtools` when available. It starts `chrome-devtools-mcp` from Antigravity's bundled dependencies and connects to the running Electron window through `DevToolsActivePort`.
+4. Report model quota state when requested.
 
-5. If the user asks for the open project or chat context, inspect the live Antigravity page through DevTools or Playwright-over-CDP:
+```powershell
+powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" models
+```
+
+The helper discovers the running Antigravity `language_server.exe`, reads its CSRF token from the process command line, finds its local HTTPS gRPC-web port, and calls:
+
+- `exa.language_server_pb.LanguageServerService/GetAvailableModels`
+- `exa.language_server_pb.LanguageServerService/GetLoadCodeAssist`
+
+Use this path for model quota checks. It is the same local language-server surface the Antigravity Models tab uses and is preferable to reading old chats or logs. The result is per-model quota fraction/reset metadata and AI credit tier data; it is not a raw token ledger unless Antigravity exposes one through these responses.
+
+5. For Codex-to-Antigravity UI inspection, use the plugin MCP server `antigravity-devtools` when available. It starts `chrome-devtools-mcp` from Antigravity's bundled dependencies and connects to the running Electron window through `DevToolsActivePort`.
+
+6. If the user asks for the open project or chat context, inspect the live Antigravity page through DevTools or Playwright-over-CDP:
 
 ```powershell
 $port = (Get-Content "$env:APPDATA\Antigravity\DevToolsActivePort")[0]
@@ -66,7 +80,7 @@ Invoke-RestMethod "http://127.0.0.1:$port/json/list"
 
 Then connect to the page WebSocket or use Playwright CDP to read the visible body text. Confirm the project name, conversation title, and model from the live UI instead of guessing from storage alone.
 
-6. If the user asks to continue a visible Antigravity chat, first verify:
+7. If the user asks to continue a visible Antigravity chat, first verify:
 
 - The intended project is visible.
 - The intended conversation is visible or selected.

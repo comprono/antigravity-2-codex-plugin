@@ -15,12 +15,13 @@
   "interface": {
     "displayName": "Antigravity 2.0",
     "shortDescription": "Connect Codex to a local Antigravity desktop app.",
-    "longDescription": "Adds Codex-side helpers for Antigravity 2.0 on Windows. The plugin can launch the desktop app, report install and process status, connect to the app's Chromium DevTools endpoint when available, inspect visible projects and chats, and hand off instructions into an existing Antigravity conversation.",
+    "longDescription": "Adds Codex-side helpers for Antigravity 2.0 on Windows. The plugin can launch the desktop app, report install and process status, read model quota state from Antigravity's local language server, connect to the app's Chromium DevTools endpoint when available, inspect visible projects and chats, and hand off instructions into an existing Antigravity conversation.",
     "developerName": "comprono",
     "category": "Productivity",
     "capabilities": [
       "Local app launch",
       "Install inspection",
+      "Model quota inspection",
       "DevTools bridge",
       "Project and chat inspection",
       "Automation handoff"

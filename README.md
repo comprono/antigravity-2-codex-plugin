@@ -8,6 +8,7 @@ This is a local Codex plugin that helps Codex connect to the Antigravity 2.0 des
 
 - Launches the local Antigravity desktop app.
 - Reports install path, user data path, running process IDs, and DevTools port.
+- Reports Antigravity model quota state from the local language server.
 - Connects to Antigravity's bundled `chrome-devtools-mcp` server when available.
 - Helps Codex inspect visible project/chat context from the live UI.
 - Supports safe chat handoff after verifying the target project, conversation, and model.
@@ -48,6 +49,14 @@ Inspect integration details:
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2\scripts\antigravity.ps1" inspect
 ```
+
+Report model quota state:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2\scripts\antigravity.ps1" models
+```
+
+The `models` command calls Antigravity's local language server over its gRPC-web API (`LanguageServerService/GetAvailableModels` and `GetLoadCodeAssist`). This is the same source the Antigravity Models tab uses. It returns per-model quota metadata such as remaining fraction and reset time when available. It does not expose a raw all-model token ledger if Antigravity itself does not publish one.
 
 ## Safety
 
