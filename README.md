@@ -10,6 +10,7 @@ This is a local Codex plugin that helps Codex connect to the Antigravity 2.0 des
 - Reports install path, user data path, running process IDs, setup readiness, and DevTools port.
 - Reports Antigravity model quota state from the local language server.
 - Connects to Antigravity's bundled `chrome-devtools-mcp` server when available.
+- Exposes local setup/model/status commands as MCP tools, so Codex can use them even when skill files are unavailable.
 - Helps Codex inspect live project/chat context from the UI.
 - Supports safe handoff to continue an existing chat, start a new chat in an existing project, or start a new project.
 - Provides a local privacy scan for sensitive data before publishing changes.
@@ -38,6 +39,15 @@ powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2
 ```
 
 The setup report tells Codex whether Antigravity is installed, whether Node.js is available, whether the bundled DevTools MCP package exists, whether the DevTools endpoint is reachable, and whether the local language-server model-limit API is ready.
+
+## MCP Tools
+
+The plugin registers two MCP servers:
+
+- `antigravity-local`: direct local tools for `setup`, `doctor`, `status`, `open`, `inspect`, `live`, `limits`, `models`, and `privacy`.
+- `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
+
+Codex should use `antigravity-local` for setup and model limits, then use `antigravity-devtools` for live project/chat UI work. This keeps the plugin useful even if a session cannot read the skill documentation.
 
 ## Usage
 

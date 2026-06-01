@@ -1,6 +1,6 @@
 {
   "name": "antigravity-2",
-  "version": "0.1.0+codex.20260601085550",
+  "version": "0.1.0+codex.20260601104635",
   "description": "Codex helpers for full local setup, inspection, model limits, and safe automation of Antigravity 2.0.",
   "author": {
     "name": "comprono"
@@ -15,12 +15,13 @@
   "interface": {
     "displayName": "Antigravity 2.0",
     "shortDescription": "Connect Codex fully to a local Antigravity desktop app.",
-    "longDescription": "Adds Codex-side helpers for Antigravity 2.0 on Windows. The plugin can verify setup on another user's machine, launch the desktop app, report install and process status, read model quota state from Antigravity's local language server, connect to the app's Chromium DevTools endpoint when available, inspect visible projects and chats, continue existing chats, start new chats in existing projects, start new projects, and hand off instructions safely after live UI verification.",
+    "longDescription": "Adds Codex-side helpers for Antigravity 2.0 on Windows. The plugin exposes local MCP tools for setup, status, live readiness, model limits, and privacy scans, plus a DevTools MCP bridge for live UI automation. It can verify setup on another user's machine, launch the desktop app, report install and process status, read model quota state from Antigravity's local language server, inspect visible projects and chats, continue existing chats, start new chats in existing projects, start new projects, and hand off instructions safely after live UI verification.",
     "developerName": "comprono",
     "category": "Productivity",
     "capabilities": [
       "Local app launch",
       "Autonomous setup checks",
+      "Local MCP setup tools",
       "Install inspection",
       "Model quota inspection",
       "Live UI inspection",

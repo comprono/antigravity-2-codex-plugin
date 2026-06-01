@@ -19,6 +19,15 @@ Core jobs:
 - Start a new project and then start a chat there.
 - Report quota, model, UI, or submission errors without repeatedly retrying.
 
+## MCP Tool Surfaces
+
+This plugin exposes two MCP servers:
+
+- `antigravity-local`: direct tools for `setup`, `doctor`, `status`, `open`, `inspect`, `live`, `limits`, `models`, and `privacy`.
+- `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
+
+Prefer `antigravity-local` for setup, readiness, status, and model limits. Prefer `antigravity-devtools` for seeing projects/chats, continuing chats, starting new chats, and starting new projects. If this skill file cannot be read in a Codex session, the MCP tools are still enough: call `setup`, then `limits`, then use DevTools for live UI work.
+
 ## Requirements
 
 - Windows desktop environment.
