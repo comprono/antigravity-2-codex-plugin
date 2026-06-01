@@ -1,6 +1,6 @@
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("status", "open", "inspect", "path", "models", "limits", "live", "setup", "doctor", "privacy")]
+  [ValidateSet("status", "open", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy")]
   [string] $Command = "status"
 )
 
@@ -33,7 +33,10 @@ function Get-DevToolsPages {
   }
 
   try {
-    @(Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/list" -TimeoutSec 5 -ErrorAction Stop)
+    $response = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/list" -TimeoutSec 5 -ErrorAction Stop
+    foreach ($page in $response) {
+      $page
+    }
   } catch {
     @()
   }
@@ -199,7 +202,7 @@ function Get-NodeInfo {
   }
 }
 
-function Get-SetupReport {
+function Get-SetupReportObject {
   $status = Write-Status | ConvertFrom-Json
   $inspect = $null
   try {
@@ -247,10 +250,14 @@ function Get-SetupReport {
     LanguageServer = $languageServer
     ReadyForModelLimits = [bool]($languageServer.Running -and $languageServer.HttpsPort -and $languageServer.HasCsrfToken)
     ReadyForLiveUiInspection = [bool]($status.Running -and $status.DevToolsPort -and $devToolsPages.Count -gt 0)
-  } | ConvertTo-Json -Depth 8
+  }
 }
 
-function Get-LiveReport {
+function Get-SetupReport {
+  Get-SetupReportObject | ConvertTo-Json -Depth 8
+}
+
+function Get-LiveReportObject {
   $status = Write-Status | ConvertFrom-Json
   $pages = Get-DevToolsPages | ForEach-Object {
     [PSCustomObject]@{
@@ -269,7 +276,11 @@ function Get-LiveReport {
     PageCount = @($pages).Count
     Pages = @($pages)
     Note = "Use the DevTools page WebSocket or the antigravity-devtools MCP server for verified live UI inspection and interaction."
-  } | ConvertTo-Json -Depth 8
+  }
+}
+
+function Get-LiveReport {
+  Get-LiveReportObject | ConvertTo-Json -Depth 8
 }
 
 function Get-PrivacyReport {
@@ -366,7 +377,7 @@ function Convert-QuotaInfo {
   }
 }
 
-function Get-AntigravityModels {
+function Get-AntigravityModelsObject {
   $server = Get-LanguageServerInfo
   if (-not $server.CsrfToken) {
     throw "Could not find the Antigravity language server CSRF token in the running process command line."
@@ -418,7 +429,111 @@ function Get-AntigravityModels {
     Note = "Antigravity exposes per-model quota fraction/reset metadata, not a raw token ledger."
     CreditStatus = $creditInfo
     Models = $models
-  } | ConvertTo-Json -Depth 12
+  }
+}
+
+function Get-AntigravityModels {
+  Get-AntigravityModelsObject | ConvertTo-Json -Depth 12
+}
+
+function Get-LimitsSummaryObject {
+  $report = Get-AntigravityModelsObject
+  $namedModels = @($report.Models | Where-Object { $_.DisplayName })
+  $available = @($namedModels | Where-Object { $_.Quota.Status -eq "available" })
+  $low = @($namedModels | Where-Object { $_.Quota.Status -eq "low" })
+  $exhausted = @($namedModels | Where-Object { $_.Quota.Status -eq "exhausted" })
+  $unknown = @($namedModels | Where-Object { $_.Quota.Status -eq "unknown" })
+
+  $recommended = @($available |
+    Sort-Object `
+      @{ Expression = { if ($_.DisplayName -match "Sonnet") { 0 } elseif ($_.DisplayName -match "Gemini") { 1 } else { 2 } } },
+      @{ Expression = { if ($_.Quota.RemainingPercent -ne $null) { -1 * $_.Quota.RemainingPercent } else { 0 } } },
+      DisplayName |
+    Select-Object -First 4 |
+    ForEach-Object {
+      [PSCustomObject]@{
+        Id = $_.Id
+        DisplayName = $_.DisplayName
+        RemainingPercent = $_.Quota.RemainingPercent
+        ResetTimeUtc = $_.Quota.ResetTimeUtc
+      }
+    })
+
+  $blocked = @($exhausted |
+    Sort-Object @{ Expression = { $_.Quota.ResetTimeUtc } }, DisplayName |
+    Select-Object -First 8 |
+    ForEach-Object {
+      [PSCustomObject]@{
+        Id = $_.Id
+        DisplayName = $_.DisplayName
+        ResetTimeUtc = $_.Quota.ResetTimeUtc
+      }
+    })
+
+  [PSCustomObject]@{
+    Source = $report.Source
+    GeneratedAtUtc = $report.GeneratedAtUtc
+    Note = $report.Note
+    Counts = [PSCustomObject]@{
+      NamedModels = $namedModels.Count
+      Available = $available.Count
+      Low = $low.Count
+      Exhausted = $exhausted.Count
+      Unknown = $unknown.Count
+    }
+    CreditStatus = $report.CreditStatus
+    RecommendedAvailable = $recommended
+    BlockedOrResetting = $blocked
+  }
+}
+
+function Get-LimitsSummary {
+  Get-LimitsSummaryObject | ConvertTo-Json -Depth 8
+}
+
+function Get-QuickReport {
+  $setup = Get-SetupReportObject
+  $live = Get-LiveReportObject
+  $limitsSummary = $null
+  $limitsError = $null
+
+  if ($setup.ReadyForModelLimits) {
+    try {
+      $limitsSummary = Get-LimitsSummaryObject
+    } catch {
+      $limitsError = $_.Exception.Message
+    }
+  }
+
+  [PSCustomObject]@{
+    Source = "Antigravity local bridge quick report"
+    GeneratedAtUtc = [datetime]::UtcNow.ToString("o")
+    Setup = [PSCustomObject]@{
+      Installed = $setup.Installed
+      Running = $setup.AntigravityRunning
+      ReadyForModelLimits = $setup.ReadyForModelLimits
+      ReadyForLiveUiInspection = $setup.ReadyForLiveUiInspection
+      DevToolsReachable = $setup.DevToolsReachable
+      NodeFound = $setup.Node.Found
+    }
+    Live = [PSCustomObject]@{
+      PageCount = $live.PageCount
+      ActivePageTitle = if (@($live.Pages).Count -gt 0) { @($live.Pages)[0].Title } else { $null }
+      DevToolsPort = $live.DevToolsPort
+    }
+    Limits = if ($limitsSummary) {
+      [PSCustomObject]@{
+        GeneratedAtUtc = $limitsSummary.GeneratedAtUtc
+        Counts = $limitsSummary.Counts
+        RecommendedAvailable = $limitsSummary.RecommendedAvailable
+        BlockedOrResetting = $limitsSummary.BlockedOrResetting
+      }
+    } else {
+      $null
+    }
+    LimitsError = $limitsError
+    NextToolHint = "Use antigravity-local quick first, antigravity-local limits-summary for compact quota checks, antigravity-local limits only when full per-model JSON is needed, then antigravity-devtools for UI actions."
+  } | ConvertTo-Json -Depth 10
 }
 
 function Write-Status {
@@ -486,6 +601,14 @@ switch ($Command) {
 
   "limits" {
     Get-AntigravityModels
+  }
+
+  "limits-summary" {
+    Get-LimitsSummary
+  }
+
+  "quick" {
+    Get-QuickReport
   }
 
   "live" {

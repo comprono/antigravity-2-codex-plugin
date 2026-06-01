@@ -23,10 +23,10 @@ Core jobs:
 
 This plugin exposes two MCP servers:
 
-- `antigravity-local`: direct tools for `setup`, `doctor`, `status`, `open`, `inspect`, `live`, `limits`, `models`, and `privacy`.
+- `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `inspect`, `live`, `limits-summary`, `limits`, `models`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
-Prefer `antigravity-local` for setup, readiness, status, and model limits. Prefer `antigravity-devtools` for seeing projects/chats, continuing chats, starting new chats, and starting new projects. If this skill file cannot be read in a Codex session, the MCP tools are still enough: call `setup`, then `limits`, then use DevTools for live UI work.
+Prefer `antigravity-local.quick` as the first call because it combines setup, live UI readiness, and a compact model-limit summary. Use `limits-summary` for normal quota checks and full `limits` only when complete per-model JSON is needed. Prefer `antigravity-devtools` for seeing projects/chats, continuing chats, starting new chats, and starting new projects. If this skill file cannot be read in a Codex session, the MCP tools are still enough: call `quick`, then use DevTools for live UI work.
 
 ## Requirements
 
@@ -62,6 +62,12 @@ Check status:
 powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" status
 ```
 
+Fast combined readiness and quota summary:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" quick
+```
+
 Open Antigravity:
 
 ```powershell
@@ -83,10 +89,12 @@ powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\an
 Report model limits:
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" limits-summary
 powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" models
 ```
 
 `limits` is an alias for `models`.
+Use `limits-summary` unless full per-model JSON is required.
 
 Run the public-repo privacy scanner:
 

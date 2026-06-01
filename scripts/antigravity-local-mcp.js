@@ -8,6 +8,11 @@ const helperScript = path.join(pluginRoot, "scripts", "antigravity.ps1");
 
 const tools = [
   {
+    name: "quick",
+    description: "Preferred first call. Compact setup, live UI, and model-limit summary in one low-token report.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
     name: "setup",
     description: "Verify Antigravity 2.0 local setup readiness: install path, runtime, Node.js, DevTools, and model-limit API.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -38,8 +43,13 @@ const tools = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
+    name: "limits-summary",
+    description: "Preferred quota check. Compact model availability summary without dumping full per-model JSON.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
     name: "limits",
-    description: "Read Antigravity model quota/limit state from the local language server.",
+    description: "Read full Antigravity model quota/limit state from the local language server. Use limits-summary first to save tokens.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
