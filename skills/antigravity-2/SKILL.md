@@ -1,6 +1,7 @@
 ---
 name: antigravity-2
 description: Connect Codex to a local Antigravity 2.0 desktop app for setup checks, model limits, live project/chat inspection, project creation, chat creation, and safe conversation handoff.
+license: MIT
 ---
 
 # Antigravity 2.0

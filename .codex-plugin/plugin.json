@@ -1,7 +1,10 @@
 {
   "name": "antigravity-2",
-  "version": "0.1.0+codex.20260601110548",
+  "version": "0.1.0",
   "description": "Codex helpers for full local setup, inspection, model limits, and safe automation of Antigravity 2.0.",
+  "repository": "https://github.com/comprono/antigravity-2-codex-plugin",
+  "homepage": "https://github.com/comprono/antigravity-2-codex-plugin",
+  "license": "MIT",
   "author": {
     "name": "comprono"
   },
@@ -17,6 +20,11 @@
     "shortDescription": "Connect Codex fully to a local Antigravity desktop app.",
     "longDescription": "Adds Codex-side helpers for Antigravity 2.0 on Windows. The plugin exposes local MCP tools for compact quick readiness checks, status, live readiness, model limit summaries, full model limits, and privacy scans, plus a DevTools MCP bridge for live UI automation. It can verify setup on another user's machine, launch the desktop app, report install and process status, read model quota state from Antigravity's local language server, inspect visible projects and chats, continue existing chats, start new chats in existing projects, start new projects, and hand off instructions safely after live UI verification.",
     "developerName": "comprono",
+    "websiteURL": "https://github.com/comprono/antigravity-2-codex-plugin",
+    "privacyPolicyURL": "https://github.com/comprono/antigravity-2-codex-plugin/blob/main/SECURITY.md",
+    "termsOfServiceURL": "https://github.com/comprono/antigravity-2-codex-plugin/blob/main/README.md",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/icon.svg",
     "category": "Productivity",
     "capabilities": [
       "Local app launch",
