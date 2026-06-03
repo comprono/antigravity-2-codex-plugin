@@ -1,6 +1,6 @@
 # Security And Privacy
 
-This plugin is a local bridge between Codex and a user's own Antigravity 2.0 desktop app.
+This plugin is a local bridge between OpenAI Codex and a user's own Google Antigravity / Antigravity 2.0 desktop app.
 
 ## Public Repo Rules
 

@@ -1,8 +1,16 @@
-# Antigravity 2.0 Codex Plugin
+# Google Antigravity Codex Plugin
 
 Created by [comprono](https://github.com/comprono).
 
+This Google Antigravity Codex Plugin is a community local Windows bridge for Codex and Google Antigravity. It helps OpenAI Codex Antigravity workflows connect to the Antigravity 2.0 desktop app using a Codex MCP plugin, DevTools MCP Antigravity controls, and local helper commands.
+
 This is a local Codex plugin that helps Codex connect to the Antigravity 2.0 desktop app on Windows. It can open Antigravity, inspect whether it is running, discover the Chromium DevTools endpoint exposed by the Electron app, read model quota state from the local language server, inspect visible projects and chats, verify the visible model, and hand off prompts into Antigravity conversations.
+
+## Google Antigravity Codex Plugin
+
+This is a community Codex plugin for Google Antigravity / Antigravity 2.0. It lets OpenAI Codex connect to a local Antigravity desktop app on Windows using MCP tools, Chromium DevTools, and local PowerShell helper commands. It provides an Antigravity 2.0 Codex bridge for people who want Codex, including Codex sessions started from ChatGPT on mobile, to hand off work into a locally running Antigravity desktop environment.
+
+Keywords: Google Antigravity Codex plugin, OpenAI Codex Antigravity, Antigravity 2.0 Codex bridge, Codex MCP plugin, DevTools MCP Antigravity.
 
 ## What It Does
 
