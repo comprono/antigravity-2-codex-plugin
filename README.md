@@ -57,7 +57,7 @@ The plugin registers two MCP servers:
 - `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `submission-guide`, `prepare-offload`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
-Codex should call `antigravity-local.prepare-offload` first when the goal is to save tokens or hand off workspace work. It combines the offload decision, quick readiness, best model hint, compact handoff text, and submit guidance in one low-token result. Use `antigravity-local.quick` for general setup checks. If `ReadyForLiveUiInspection` is false, call `antigravity-local.repair-live` once before using DevTools. If repair restarts Antigravity, an already-started DevTools MCP connection may need to reconnect to the new port. If `antigravity-devtools` fails with `Transport closed`, call `antigravity-local.devtools-health`; do not keep retrying `list_pages` in the same broken transport. Use `limits-summary` for normal quota checks and full `limits` only when the complete per-model JSON is needed. Then use `antigravity-devtools` for live project/chat UI work only after the transport is healthy. This keeps the plugin useful even if a session cannot read the skill documentation and avoids wasting tokens on repeated full dumps.
+Codex should call `antigravity-local.prepare-offload` first for nontrivial workspace, repo, browser, UI, research, planning, debugging, review, implementation, and job-application work. The intended cost split is: Antigravity explores and works locally; Codex plans, gates safety, reviews final changes, and summarizes. `prepare-offload` combines the offload decision, quick readiness, best model hint, compact handoff text, and submit guidance in one low-token result. Use `antigravity-local.quick` for general setup checks. If `ReadyForLiveUiInspection` is false, call `antigravity-local.repair-live` once before using DevTools. If repair restarts Antigravity, an already-started DevTools MCP connection may need to reconnect to the new port. If `antigravity-devtools` fails with `Transport closed`, call `antigravity-local.devtools-health`; do not keep retrying `list_pages` in the same broken transport. Use `limits-summary` for normal quota checks and full `limits` only when the complete per-model JSON is needed. Then use `antigravity-devtools` for live project/chat UI work only after the transport is healthy. This keeps the plugin useful even if a session cannot read the skill documentation and avoids wasting tokens on repeated full dumps.
 
 ## Usage
 
@@ -137,8 +137,8 @@ Use this plugin to make Codex the router and verifier while Antigravity does the
 
 Token savings are not automatic. First decide whether the task is worth offloading:
 
-- Keep Codex direct for arithmetic, short factual answers, tiny shell checks, small summaries, and prompts that do not need workspace context.
-- Use Antigravity for long project work, implementation, debugging, UI operation, job-search/application workflows, and analysis where Antigravity can inspect local files and write a compact result.
+- Keep Codex direct only for arithmetic, short factual answers, tiny shell checks, small summaries, and prompts that do not need workspace context.
+- Use Antigravity by default for project work, implementation, debugging, reviews, planning, research, UI operation, job-search/application workflows, and analysis where Antigravity can inspect local files and write a compact result.
 - In existing project chats, assume Antigravity may inspect attached folders before answering. That is useful for real project work and wasteful for tiny tests.
 - If Antigravity starts broad folder exploration for a small task, cancel it and answer directly in Codex.
 

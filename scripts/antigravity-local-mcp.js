@@ -59,7 +59,7 @@ const tools = [
   },
   {
     name: "prepare-offload",
-    description: "One-call fast path: decide offload, check live/model readiness, generate the compact handoff, and give submit instructions.",
+    description: "Default first call for nontrivial work. Decide offload, check live/model readiness, generate the compact handoff, and give submit instructions.",
     inputSchema: {
       type: "object",
       properties: {
@@ -205,10 +205,10 @@ function getOffloadDecision(args = {}) {
   const estimatedCodexInputTokens = Number(args.estimatedCodexInputTokens || 0);
   const lowerGoal = goal.toLowerCase();
   const trivialPattern = /\b(2\s*\+\s*2|add\s+2\s*\+\s*2|what\s+is|time|date|summari[sz]e\s+this\s+short|one\s+line|yes\s+or\s+no)\b/;
-  const workspacePattern = /\b(repo|workspace|project|files?|diff|logs?|tests?|build|lint|implement|refactor|debug|apply|continue\s+chat|job\s+search|browser|ui)\b/;
+  const workspacePattern = /\b(repo|workspace|project|files?|diff|logs?|tests?|build|lint|implement|refactor|debug|apply|continue\s+chat|job\s+search|browser|ui|analy[sz]e|review|plan|research|inspect|investigate|fix|patch|error|failure|trace|search|compare)\b/;
 
   const trivial = trivialPattern.test(lowerGoal) || (!hasWorkspaceWork && estimatedCodexInputTokens > 0 && estimatedCodexInputTokens < 400);
-  const workspaceLikely = hasWorkspaceWork || workspacePattern.test(lowerGoal) || estimatedCodexInputTokens >= 2000;
+  const workspaceLikely = hasWorkspaceWork || workspacePattern.test(lowerGoal) || estimatedCodexInputTokens >= 800;
   const shouldOffload = workspaceLikely && !trivial;
 
   const decision = shouldOffload ? "offload-to-antigravity" : "codex-direct";
@@ -226,8 +226,8 @@ function buildOffloadAdvice(args = {}) {
     `Reason: ${reason}`,
     "",
     "Rules:",
-    "- Use Codex direct for arithmetic, short factual answers, tiny commands, and small summaries.",
-    "- Use Antigravity for long workspace tasks, UI/project continuation, job-search/application work, debugging, implementation, and analysis that would require Codex to read large files or logs.",
+    "- Use Codex direct only for arithmetic, short factual answers, tiny commands, and small summaries.",
+    "- Use Antigravity by default for nontrivial workspace tasks, UI/project continuation, job-search/application work, debugging, implementation, reviews, research, planning, and analysis that would make Codex read files or long output.",
     "- In existing project chats, assume Antigravity may scan attached folders. For small tests, use a blank/no-workspace chat when available or do not offload.",
     "- If Antigravity unexpectedly starts broad folder exploration for a small task, cancel and report that offload is not token-efficient.",
     "- When offloading, send a compact handoff and ask Antigravity to write a small status artifact; Codex should read only that artifact or a targeted diff.",

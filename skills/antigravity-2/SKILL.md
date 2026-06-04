@@ -27,7 +27,7 @@ This plugin exposes two MCP servers:
 - `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `submission-guide`, `prepare-offload`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
-Prefer `antigravity-local.prepare-offload` as the first call when the user wants Codex to save tokens, ride on Antigravity, or hand off workspace work. It combines offload decision, quick readiness, best model hint, compact handoff text, and submission instructions in one low-token result. Use `antigravity-local.quick` for general setup checks. If `ReadyForLiveUiInspection` is false or `PageCount` is zero, call `antigravity-local.repair-live` once before using DevTools. If `repair-live` restarts Antigravity, do not keep using an already-started stale DevTools MCP connection; let it reconnect to the new port before UI calls. If `antigravity-devtools` fails with `Transport closed`, do not repeatedly call `list_pages` in that session. Call `antigravity-local.devtools-health`; if it reports pages are ready, restart Codex to recreate the DevTools MCP transport or use `handoff-template` for a manual paste this turn. Use `limits-summary` for normal quota checks and full `limits` only when complete per-model JSON is needed. Prefer `antigravity-devtools` for seeing projects/chats, continuing chats, starting new chats, and starting new projects only after the transport is healthy. If this skill file cannot be read in a Codex session, the MCP tools are still enough: call `prepare-offload` for offload work, repair live inspection if needed, then use DevTools only for minimal UI work.
+Prefer `antigravity-local.prepare-offload` as the first call for any nontrivial workspace, repo, browser, UI, research, planning, debugging, review, implementation, or job-application task. Codex is much more expensive, so default to Antigravity for exploration and long reasoning, while Codex stays the planner, safety gate, patch reviewer, and final summarizer. `prepare-offload` combines offload decision, quick readiness, best model hint, compact handoff text, and submission instructions in one low-token result. Use `antigravity-local.quick` for general setup checks. If `ReadyForLiveUiInspection` is false or `PageCount` is zero, call `antigravity-local.repair-live` once before using DevTools. If `repair-live` restarts Antigravity, do not keep using an already-started stale DevTools MCP connection; let it reconnect to the new port before UI calls. If `antigravity-devtools` fails with `Transport closed`, do not repeatedly call `list_pages` in that session. Call `antigravity-local.devtools-health`; if it reports pages are ready, restart Codex to recreate the DevTools MCP transport or use `handoff-template` for a manual paste this turn. Use `limits-summary` for normal quota checks and full `limits` only when complete per-model JSON is needed. Prefer `antigravity-devtools` for seeing projects/chats, continuing chats, starting new chats, and starting new projects only after the transport is healthy. If this skill file cannot be read in a Codex session, the MCP tools are still enough: call `prepare-offload` for offload work, repair live inspection if needed, then use DevTools only for minimal UI work.
 
 ## Requirements
 
@@ -247,7 +247,7 @@ Use Antigravity as an offload worker when the user wants to save Codex tokens or
 
 ### Offload Decision Gate
 
-Run `antigravity-local.offload-advice` before opening or driving the Antigravity UI unless the user explicitly asks to inspect the live UI. This is the cheapest token-saving step.
+Run `antigravity-local.prepare-offload` before opening or driving the Antigravity UI unless the user explicitly asks to inspect the live UI. This is the cheapest token-saving step because it replaces several separate checks.
 
 Do not offload:
 
@@ -258,10 +258,15 @@ Do not offload:
 
 Do offload:
 
-- long workspace tasks that would make Codex read many files, large logs, or full transcripts,
+- most nontrivial workspace tasks that would make Codex read files, large logs, browser state, or transcripts,
 - ongoing Antigravity project/chat work where the Antigravity context is already useful,
-- debugging, implementation, job-search/application workflows, UI operation, and analysis that can write a compact artifact,
+- debugging, implementation, job-search/application workflows, UI operation, reviews, planning, research, and analysis that can write a compact artifact,
 - tasks where Antigravity can keep working while Codex waits and then reads only a small result.
+
+Cost split:
+
+- Antigravity explores, searches, reads files, inspects UI, drafts plans, and writes status artifacts.
+- Codex decides whether the handoff is safe, patches final code when needed, verifies diffs/tests, and explains the result to the user.
 
 Important lesson from project chats: Antigravity may automatically inspect attached folders before answering, even for a tiny prompt. That is useful for real project work but wasteful for tests like `2+2`. If Antigravity starts broad folder exploration for a small task, cancel it and report that offload is not token-efficient.
 
