@@ -6,7 +6,7 @@ This Google Antigravity Codex Plugin is a community local Windows bridge for Cod
 
 This is a local Codex plugin that helps Codex connect to the Antigravity 2.0 desktop app on Windows. It can open Antigravity, inspect whether it is running, discover the Chromium DevTools endpoint exposed by the Electron app, read model quota state from the local language server, inspect visible projects and chats, verify the visible model, and hand off prompts into Antigravity conversations.
 
-you can use antigravity on your phone with chatgpt app in codex menu once you link it localy with this plugin 
+After setup, you can start from the ChatGPT mobile app, open Codex, and use this local plugin as the bridge into your Windows Antigravity desktop session.
 
 ## Google Antigravity Codex Plugin
 
