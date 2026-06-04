@@ -67,6 +67,21 @@ const tools = [
     description: "Scan this plugin repository for obvious sensitive data before publishing.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
+  {
+    name: "handoff-template",
+    description: "Generate a compact Antigravity offload prompt without reading files or using DevTools UI tokens.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "Task goal for Antigravity." },
+        workspace: { type: "string", description: "Local workspace path or project name." },
+        statusFile: { type: "string", description: "Small artifact Antigravity should write.", default: "notes/antigravity-status.md" },
+        nextStep: { type: "string", description: "Specific next action.", default: "Inspect the relevant files and write a compact status checkpoint." },
+      },
+      required: ["goal"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 function sendMessage(message) {
@@ -121,6 +136,28 @@ function runHelper(command) {
   });
 }
 
+function buildHandoffTemplate(args = {}) {
+  const goal = String(args.goal || "<goal>").trim();
+  const workspace = String(args.workspace || "<workspace/path>").trim();
+  const statusFile = String(args.statusFile || "notes/antigravity-status.md").trim();
+  const nextStep = String(args.nextStep || "Inspect the relevant files and write a compact status checkpoint.").trim();
+
+  return [
+    "Use this as a compact Antigravity offload handoff:",
+    "",
+    "```text",
+    `Goal: ${goal}`,
+    `Workspace: ${workspace}`,
+    "Constraints: inspect files locally; do not paste full files, full logs, or full source; use search before reading whole files.",
+    `Token rule: work token-efficiently; write progress to ${statusFile}; output max 10 bullets plus changed file list.`,
+    `Next step: ${nextStep}`,
+    "If blocked: ask one concise question; otherwise continue autonomously.",
+    "```",
+    "",
+    "Codex follow-up rule: do not read the full Antigravity chat. Read only the status artifact, targeted diffs, or a compact visible UI status.",
+  ].join("\n");
+}
+
 async function handleRequest(message) {
   const { id, method, params } = message;
 
@@ -151,6 +188,12 @@ async function handleRequest(message) {
     }
 
     try {
+      if (name === "handoff-template") {
+        const text = buildHandoffTemplate(params?.arguments || {});
+        sendResult(id, { content: [{ type: "text", text }] });
+        return;
+      }
+
       const command = name === "models" ? "limits" : name;
       const result = await runHelper(command);
       sendResult(id, {

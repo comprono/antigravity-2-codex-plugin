@@ -24,10 +24,10 @@ Core jobs:
 
 This plugin exposes two MCP servers:
 
-- `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `limits-summary`, `limits`, `models`, and `privacy`.
+- `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `limits-summary`, `limits`, `models`, `handoff-template`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
-Prefer `antigravity-local.quick` as the first call because it combines setup, live UI readiness, and a compact model-limit summary. If `ReadyForLiveUiInspection` is false or `PageCount` is zero, call `antigravity-local.repair-live` once before using DevTools. Use `limits-summary` for normal quota checks and full `limits` only when complete per-model JSON is needed. Prefer `antigravity-devtools` for seeing projects/chats, continuing chats, starting new chats, and starting new projects. If this skill file cannot be read in a Codex session, the MCP tools are still enough: call `quick`, repair live inspection if needed, then use DevTools for live UI work.
+Prefer `antigravity-local.quick` as the first call because it combines setup, live UI readiness, and a compact model-limit summary. If `ReadyForLiveUiInspection` is false or `PageCount` is zero, call `antigravity-local.repair-live` once before using DevTools. If `repair-live` restarts Antigravity, do not keep using an already-started stale DevTools MCP connection; let it reconnect to the new port before UI calls. Use `limits-summary` for normal quota checks and full `limits` only when complete per-model JSON is needed. Prefer `antigravity-devtools` for seeing projects/chats, continuing chats, starting new chats, and starting new projects. If this skill file cannot be read in a Codex session, the MCP tools are still enough: call `quick`, repair live inspection if needed, then use DevTools for live UI work.
 
 ## Requirements
 
@@ -79,6 +79,12 @@ Repair live DevTools inspection if Antigravity is running but exposes zero pages
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" repair-live
+```
+
+Generate a compact handoff prompt without touching the UI:
+
+```text
+Call antigravity-local.handoff-template with goal, workspace, statusFile, and nextStep.
 ```
 
 Inspect integration details:
@@ -217,6 +223,8 @@ Preferred flow:
 6. Ask Antigravity to inspect files locally, write progress/results to a small status artifact, and avoid pasting full files or logs.
 7. Stop monitoring every step. Wait until Antigravity visibly stops or writes the status artifact.
 8. Read only the small artifact or changed-file list, then summarize to the user in a few bullets.
+
+If DevTools UI submission fails because a stale port is still attached, do not spend more tokens probing CDP from Codex. Use `antigravity-local.handoff-template` to prepare the compact prompt, report that UI submission was blocked by stale DevTools, and ask the user to restart Codex or paste the handoff manually. The next Codex session should load the new DevTools port.
 
 Recommended handoff prompt:
 

@@ -54,10 +54,10 @@ The setup report tells Codex whether Antigravity is installed, whether Node.js i
 
 The plugin registers two MCP servers:
 
-- `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `limits-summary`, `limits`, `models`, and `privacy`.
+- `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `limits-summary`, `limits`, `models`, `handoff-template`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
-Codex should call `antigravity-local.quick` first. If `ReadyForLiveUiInspection` is false, call `antigravity-local.repair-live` once before using DevTools. Use `limits-summary` for normal quota checks and full `limits` only when the complete per-model JSON is needed. Then use `antigravity-devtools` for live project/chat UI work. This keeps the plugin useful even if a session cannot read the skill documentation and avoids wasting tokens on repeated full dumps.
+Codex should call `antigravity-local.quick` first. If `ReadyForLiveUiInspection` is false, call `antigravity-local.repair-live` once before using DevTools. If repair restarts Antigravity, an already-started DevTools MCP connection may need to reconnect to the new port. Use `limits-summary` for normal quota checks and full `limits` only when the complete per-model JSON is needed. Then use `antigravity-devtools` for live project/chat UI work. This keeps the plugin useful even if a session cannot read the skill documentation and avoids wasting tokens on repeated full dumps.
 
 ## Usage
 
@@ -134,6 +134,8 @@ Recommended flow:
 5. Send Antigravity a compact handoff prompt with the goal, workspace path, constraints, next step, and output format.
 6. Ask Antigravity to write progress to a small artifact such as `notes/antigravity-status.md`, `plans/antigravity-next.md`, or `reports/antigravity-result.json`.
 7. Codex reads only that artifact, a targeted diff, or a compact visible UI status, then summarizes for the user.
+
+If UI submission is blocked by a stale DevTools port, use `antigravity-local.handoff-template` to generate the compact prompt and avoid repeated CDP probing. Restart Codex or paste the generated handoff manually so the next session attaches to the current Antigravity port.
 
 Compact handoff template:
 

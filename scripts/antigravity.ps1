@@ -85,6 +85,23 @@ function Stop-AntigravityForRepair {
   }
 }
 
+function Stop-DevToolsMcpProcesses {
+  $stopped = @()
+  $processes = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*chrome-devtools-mcp*" })
+
+  foreach ($process in $processes) {
+    try {
+      Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+      $stopped += [int]$process.ProcessId
+    } catch {
+      # Ignore processes that exited between enumeration and stop.
+    }
+  }
+
+  $stopped
+}
+
 function Start-AntigravityAndWait {
   param(
     [int] $TimeoutSeconds = 20
@@ -116,8 +133,10 @@ function Repair-LiveDevTools {
     }
   }
 
+  $stoppedMcpBefore = @(Stop-DevToolsMcpProcesses)
   Stop-AntigravityForRepair
   Start-AntigravityAndWait -TimeoutSeconds 25
+  $stoppedMcpAfter = @(Stop-DevToolsMcpProcesses)
   $after = Get-LiveReportObject
 
   [PSCustomObject]@{
@@ -127,6 +146,8 @@ function Repair-LiveDevTools {
     Reason = "Live DevTools had no inspectable pages."
     Before = $before
     After = $after
+    StoppedDevToolsMcpProcessIds = @($stoppedMcpBefore + $stoppedMcpAfter)
+    StaleMcpNote = "If repair-live restarted Antigravity, any already-started antigravity-devtools MCP process must reconnect to the new DevTools port before UI actions."
     ReadyForLiveUiInspection = [bool]($after.Running -and $after.PageCount -gt 0)
   }
 }
@@ -644,7 +665,7 @@ function Get-QuickReport {
       $null
     }
     LimitsError = $limitsError
-    NextToolHint = "Use antigravity-local quick first. If ReadyForLiveUiInspection is false, call repair-live once. Use limits-summary for compact quota checks, full limits only when needed, then antigravity-devtools for UI actions."
+    NextToolHint = "Use antigravity-local quick first. If ReadyForLiveUiInspection is false, call repair-live once. If repair restarts Antigravity, reconnect DevTools before UI calls. Use limits-summary for compact quota checks, full limits only when needed. If UI handoff is blocked, use handoff-template."
   } | ConvertTo-Json -Depth 10
 }
 
