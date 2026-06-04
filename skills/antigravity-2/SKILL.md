@@ -195,6 +195,61 @@ Inspect the active page text and state through DevTools. Summarize:
 
 Do not expose unrelated private chat content unless the user asked for that specific context.
 
+## Token-Saving Offload Workflow
+
+Use Antigravity as an offload worker when the user wants to save Codex tokens or asks Codex to "ride on" Antigravity.
+
+Core rule:
+
+- Codex is the router, verifier, and final summarizer.
+- Antigravity is the long-running worker.
+- Files are the compact memory between them.
+
+Do not copy large files, long logs, full source, or full Antigravity chat transcripts into Codex. Savings happen only when Codex sends compact instructions, lets Antigravity inspect the workspace locally, and reads back a small artifact or status checkpoint.
+
+Preferred flow:
+
+1. Run `antigravity-local.quick`.
+2. If `ReadyForLiveUiInspection` is false, run `antigravity-local.repair-live` once.
+3. Run `antigravity-local.limits-summary`; avoid full `limits` unless model-level JSON is actually needed.
+4. Use `antigravity-devtools` to verify the target project, chat, model, and idle composer.
+5. Send Antigravity a compact handoff prompt with only the goal, workspace/path, constraints, next step, and required output format.
+6. Ask Antigravity to inspect files locally, write progress/results to a small status artifact, and avoid pasting full files or logs.
+7. Stop monitoring every step. Wait until Antigravity visibly stops or writes the status artifact.
+8. Read only the small artifact or changed-file list, then summarize to the user in a few bullets.
+
+Recommended handoff prompt:
+
+```text
+Goal: <goal>
+Workspace: <path>
+Constraints: inspect files locally; do not paste full files, full logs, or full source; use search before reading whole files.
+Token rule: work token-efficiently; write progress to <small-status-file>; output max 10 bullets plus changed file list.
+Next step: <specific next action>
+If blocked: ask one concise question; otherwise continue autonomously.
+```
+
+Recommended artifacts:
+
+- `notes/antigravity-status.md`
+- `plans/antigravity-next.md`
+- `reports/antigravity-result.json`
+- a Git diff, branch, or commit with a short summary
+
+When checking back, Codex should read only the artifact, targeted diffs, or a compact visible UI status. Do not ask Antigravity to restate the whole conversation. Use delta prompts such as:
+
+```text
+Continue from reports/antigravity-result.json. Only fix the failing item. Return max 5 bullets and changed file paths.
+```
+
+Report back to the user with:
+
+- project/chat used,
+- model selected,
+- whether Antigravity accepted the task,
+- current status,
+- next action needed.
+
 ## Public Plugin Hygiene
 
 Before committing or publishing:

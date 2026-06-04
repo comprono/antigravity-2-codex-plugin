@@ -121,6 +121,31 @@ This plugin intentionally combines two local surfaces:
 
 For chat actions, Codex should verify the target project, conversation, and selected model before sending anything. For new projects or new chats, Codex should use the visible Antigravity controls through DevTools automation and report whether Antigravity accepted the action or showed an error/quota state.
 
+## Token-Saving Offload Pattern
+
+Use this plugin to make Codex the router and verifier while Antigravity does the long work. Codex should avoid reading huge files, full logs, or full Antigravity chat transcripts. Instead, Codex sends Antigravity a compact handoff, lets Antigravity inspect the workspace locally, and reads back only a small artifact or status checkpoint.
+
+Recommended flow:
+
+1. Run `antigravity-local.quick`.
+2. If live inspection is not ready, run `antigravity-local.repair-live` once.
+3. Run `antigravity-local.limits-summary` instead of full `limits`.
+4. Use `antigravity-devtools` to verify the project, chat, model, and idle composer.
+5. Send Antigravity a compact handoff prompt with the goal, workspace path, constraints, next step, and output format.
+6. Ask Antigravity to write progress to a small artifact such as `notes/antigravity-status.md`, `plans/antigravity-next.md`, or `reports/antigravity-result.json`.
+7. Codex reads only that artifact, a targeted diff, or a compact visible UI status, then summarizes for the user.
+
+Compact handoff template:
+
+```text
+Goal: <goal>
+Workspace: <path>
+Constraints: inspect files locally; do not paste full files, full logs, or full source; use search before reading whole files.
+Token rule: work token-efficiently; write progress to <small-status-file>; output max 10 bullets plus changed file list.
+Next step: <specific next action>
+If blocked: ask one concise question; otherwise continue autonomously.
+```
+
 ## Safety
 
 This plugin operates only on the local machine and local Antigravity profile. It does not patch Antigravity internals, commit runtime tokens, or call Antigravity cloud APIs directly. Treat Antigravity user data, settings, chats, and workspace files as user-owned state.
