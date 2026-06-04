@@ -54,7 +54,7 @@ The setup report tells Codex whether Antigravity is installed, whether Node.js i
 
 The plugin registers two MCP servers:
 
-- `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `limits-summary`, `limits`, `models`, `handoff-template`, and `privacy`.
+- `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
 Codex should call `antigravity-local.quick` first. If `ReadyForLiveUiInspection` is false, call `antigravity-local.repair-live` once before using DevTools. If repair restarts Antigravity, an already-started DevTools MCP connection may need to reconnect to the new port. Use `limits-summary` for normal quota checks and full `limits` only when the complete per-model JSON is needed. Then use `antigravity-devtools` for live project/chat UI work. This keeps the plugin useful even if a session cannot read the skill documentation and avoids wasting tokens on repeated full dumps.
@@ -125,15 +125,23 @@ For chat actions, Codex should verify the target project, conversation, and sele
 
 Use this plugin to make Codex the router and verifier while Antigravity does the long work. Codex should avoid reading huge files, full logs, or full Antigravity chat transcripts. Instead, Codex sends Antigravity a compact handoff, lets Antigravity inspect the workspace locally, and reads back only a small artifact or status checkpoint.
 
+Token savings are not automatic. First decide whether the task is worth offloading:
+
+- Keep Codex direct for arithmetic, short factual answers, tiny shell checks, small summaries, and prompts that do not need workspace context.
+- Use Antigravity for long project work, implementation, debugging, UI operation, job-search/application workflows, and analysis where Antigravity can inspect local files and write a compact result.
+- In existing project chats, assume Antigravity may inspect attached folders before answering. That is useful for real project work and wasteful for tiny tests.
+- If Antigravity starts broad folder exploration for a small task, cancel it and answer directly in Codex.
+
 Recommended flow:
 
 1. Run `antigravity-local.quick`.
 2. If live inspection is not ready, run `antigravity-local.repair-live` once.
-3. Run `antigravity-local.limits-summary` instead of full `limits`.
-4. Use `antigravity-devtools` to verify the project, chat, model, and idle composer.
-5. Send Antigravity a compact handoff prompt with the goal, workspace path, constraints, next step, and output format.
-6. Ask Antigravity to write progress to a small artifact such as `notes/antigravity-status.md`, `plans/antigravity-next.md`, or `reports/antigravity-result.json`.
-7. Codex reads only that artifact, a targeted diff, or a compact visible UI status, then summarizes for the user.
+3. Run `antigravity-local.offload-advice` with the goal and continue only when it returns `offload-to-antigravity`.
+4. Run `antigravity-local.limits-summary` instead of full `limits`.
+5. Use `antigravity-devtools` to verify the project, chat, model, idle composer, and whether workspace context is appropriate.
+6. Send Antigravity a compact handoff prompt with the goal, workspace path, constraints, next step, and output format.
+7. Ask Antigravity to write progress to a small artifact such as `notes/antigravity-status.md`, `plans/antigravity-next.md`, or `reports/antigravity-result.json`.
+8. Codex reads only that artifact, a targeted diff, or a compact visible UI status, then summarizes for the user.
 
 If UI submission is blocked by a stale DevTools port, use `antigravity-local.handoff-template` to generate the compact prompt and avoid repeated CDP probing. Restart Codex or paste the generated handoff manually so the next session attaches to the current Antigravity port.
 

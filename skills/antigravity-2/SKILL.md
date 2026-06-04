@@ -24,7 +24,7 @@ Core jobs:
 
 This plugin exposes two MCP servers:
 
-- `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `limits-summary`, `limits`, `models`, `handoff-template`, and `privacy`.
+- `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
 Prefer `antigravity-local.quick` as the first call because it combines setup, live UI readiness, and a compact model-limit summary. If `ReadyForLiveUiInspection` is false or `PageCount` is zero, call `antigravity-local.repair-live` once before using DevTools. If `repair-live` restarts Antigravity, do not keep using an already-started stale DevTools MCP connection; let it reconnect to the new port before UI calls. Use `limits-summary` for normal quota checks and full `limits` only when complete per-model JSON is needed. Prefer `antigravity-devtools` for seeing projects/chats, continuing chats, starting new chats, and starting new projects. If this skill file cannot be read in a Codex session, the MCP tools are still enough: call `quick`, repair live inspection if needed, then use DevTools for live UI work.
@@ -85,6 +85,12 @@ Generate a compact handoff prompt without touching the UI:
 
 ```text
 Call antigravity-local.handoff-template with goal, workspace, statusFile, and nextStep.
+```
+
+Check whether a task should be offloaded before using UI tokens:
+
+```text
+Call antigravity-local.offload-advice with goal, hasWorkspaceWork, and estimatedCodexInputTokens.
 ```
 
 Inspect integration details:
@@ -205,6 +211,26 @@ Do not expose unrelated private chat content unless the user asked for that spec
 
 Use Antigravity as an offload worker when the user wants to save Codex tokens or asks Codex to "ride on" Antigravity.
 
+### Offload Decision Gate
+
+Run `antigravity-local.offload-advice` before opening or driving the Antigravity UI unless the user explicitly asks to inspect the live UI. This is the cheapest token-saving step.
+
+Do not offload:
+
+- arithmetic, short factual answers, tiny transformations, or simple status questions,
+- small shell checks where Codex can run one command and summarize compactly,
+- prompts that can be answered without reading project files, logs, browser state, or long chat history,
+- tests inside an existing project chat when the task does not need that project's workspace.
+
+Do offload:
+
+- long workspace tasks that would make Codex read many files, large logs, or full transcripts,
+- ongoing Antigravity project/chat work where the Antigravity context is already useful,
+- debugging, implementation, job-search/application workflows, UI operation, and analysis that can write a compact artifact,
+- tasks where Antigravity can keep working while Codex waits and then reads only a small result.
+
+Important lesson from project chats: Antigravity may automatically inspect attached folders before answering, even for a tiny prompt. That is useful for real project work but wasteful for tests like `2+2`. If Antigravity starts broad folder exploration for a small task, cancel it and report that offload is not token-efficient.
+
 Core rule:
 
 - Codex is the router, verifier, and final summarizer.
@@ -217,12 +243,13 @@ Preferred flow:
 
 1. Run `antigravity-local.quick`.
 2. If `ReadyForLiveUiInspection` is false, run `antigravity-local.repair-live` once.
-3. Run `antigravity-local.limits-summary`; avoid full `limits` unless model-level JSON is actually needed.
-4. Use `antigravity-devtools` to verify the target project, chat, model, and idle composer.
-5. Send Antigravity a compact handoff prompt with only the goal, workspace/path, constraints, next step, and required output format.
-6. Ask Antigravity to inspect files locally, write progress/results to a small status artifact, and avoid pasting full files or logs.
-7. Stop monitoring every step. Wait until Antigravity visibly stops or writes the status artifact.
-8. Read only the small artifact or changed-file list, then summarize to the user in a few bullets.
+3. Run `antigravity-local.offload-advice` with the goal. Continue only if the decision is `offload-to-antigravity`.
+4. Run `antigravity-local.limits-summary`; avoid full `limits` unless model-level JSON is actually needed.
+5. Use `antigravity-devtools` to verify the target project, chat, model, idle composer, and whether workspace context is appropriate.
+6. Send Antigravity a compact handoff prompt with only the goal, workspace/path, constraints, next step, and required output format.
+7. Ask Antigravity to inspect files locally, write progress/results to a small status artifact, and avoid pasting full files or logs.
+8. Stop monitoring every step. Wait until Antigravity visibly stops or writes the status artifact.
+9. Read only the small artifact or changed-file list, then summarize to the user in a few bullets.
 
 If DevTools UI submission fails because a stale port is still attached, do not spend more tokens probing CDP from Codex. Use `antigravity-local.handoff-template` to prepare the compact prompt, report that UI submission was blocked by stale DevTools, and ask the user to restart Codex or paste the handoff manually. The next Codex session should load the new DevTools port.
 

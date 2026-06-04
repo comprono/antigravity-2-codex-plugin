@@ -82,6 +82,20 @@ const tools = [
       additionalProperties: false,
     },
   },
+  {
+    name: "offload-advice",
+    description: "Cheap decision gate for whether Codex should offload a task to Antigravity or answer/act directly.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "User task or intended Antigravity handoff." },
+        hasWorkspaceWork: { type: "boolean", description: "Whether the task needs local project files, diffs, logs, or long workspace inspection.", default: false },
+        estimatedCodexInputTokens: { type: "number", description: "Rough Codex tokens needed if handled directly.", default: 0 },
+      },
+      required: ["goal"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 function sendMessage(message) {
@@ -158,6 +172,36 @@ function buildHandoffTemplate(args = {}) {
   ].join("\n");
 }
 
+function buildOffloadAdvice(args = {}) {
+  const goal = String(args.goal || "").trim();
+  const hasWorkspaceWork = Boolean(args.hasWorkspaceWork);
+  const estimatedCodexInputTokens = Number(args.estimatedCodexInputTokens || 0);
+  const lowerGoal = goal.toLowerCase();
+  const trivialPattern = /\b(2\s*\+\s*2|add\s+2\s*\+\s*2|what\s+is|time|date|summari[sz]e\s+this\s+short|one\s+line|yes\s+or\s+no)\b/;
+  const workspacePattern = /\b(repo|workspace|project|files?|diff|logs?|tests?|build|lint|implement|refactor|debug|apply|continue\s+chat|job\s+search|browser|ui)\b/;
+
+  const trivial = trivialPattern.test(lowerGoal) || (!hasWorkspaceWork && estimatedCodexInputTokens > 0 && estimatedCodexInputTokens < 400);
+  const workspaceLikely = hasWorkspaceWork || workspacePattern.test(lowerGoal) || estimatedCodexInputTokens >= 2000;
+  const shouldOffload = workspaceLikely && !trivial;
+
+  const decision = shouldOffload ? "offload-to-antigravity" : "codex-direct";
+  const reason = shouldOffload
+    ? "The task appears to benefit from Antigravity inspecting the local workspace or running longer reasoning while Codex reads back a compact artifact."
+    : "The task is small enough that DevTools navigation, project context scanning, and Antigravity startup/agent overhead will likely cost more time and tokens than Codex answering directly.";
+
+  return [
+    `Decision: ${decision}`,
+    `Reason: ${reason}`,
+    "",
+    "Rules:",
+    "- Use Codex direct for arithmetic, short factual answers, tiny commands, and small summaries.",
+    "- Use Antigravity for long workspace tasks, UI/project continuation, job-search/application work, debugging, implementation, and analysis that would require Codex to read large files or logs.",
+    "- In existing project chats, assume Antigravity may scan attached folders. For small tests, use a blank/no-workspace chat when available or do not offload.",
+    "- If Antigravity unexpectedly starts broad folder exploration for a small task, cancel and report that offload is not token-efficient.",
+    "- When offloading, send a compact handoff and ask Antigravity to write a small status artifact; Codex should read only that artifact or a targeted diff.",
+  ].join("\n");
+}
+
 async function handleRequest(message) {
   const { id, method, params } = message;
 
@@ -190,6 +234,12 @@ async function handleRequest(message) {
     try {
       if (name === "handoff-template") {
         const text = buildHandoffTemplate(params?.arguments || {});
+        sendResult(id, { content: [{ type: "text", text }] });
+        return;
+      }
+
+      if (name === "offload-advice") {
+        const text = buildOffloadAdvice(params?.arguments || {});
         sendResult(id, { content: [{ type: "text", text }] });
         return;
       }
