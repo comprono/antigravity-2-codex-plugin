@@ -99,6 +99,12 @@ Prepare the whole token-saving handoff in one call:
 Call antigravity-local.prepare-offload with goal, workspace, statusFile, nextStep, hasWorkspaceWork, and estimatedCodexInputTokens.
 ```
 
+If MCP tools are unavailable and Codex can only run shell commands, use the PowerShell helper equivalent:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" prepare-offload -Goal "<goal>" -Workspace "<path>" -StatusFile "notes/antigravity-status.md" -NextStep "<next step>"
+```
+
 Inspect integration details:
 
 ```powershell

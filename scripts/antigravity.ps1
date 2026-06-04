@@ -1,7 +1,14 @@
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("status", "open", "repair-live", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy")]
-  [string] $Command = "status"
+  [ValidateSet("status", "open", "repair-live", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy", "devtools-health", "submission-guide", "offload-advice", "handoff-template", "prepare-offload")]
+  [string] $Command = "status",
+
+  [string] $Goal = "",
+  [string] $Workspace = "",
+  [string] $StatusFile = "notes/antigravity-status.md",
+  [string] $NextStep = "Inspect the relevant files and write a compact status checkpoint.",
+  [object] $HasWorkspaceWork = $true,
+  [int] $EstimatedCodexInputTokens = 2000
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,6 +21,36 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 
 function Get-AntigravityProcess {
   Get-Process -Name "Antigravity" -ErrorAction SilentlyContinue
+}
+
+function ConvertTo-BooleanValue {
+  param(
+    [object] $Value,
+    [bool] $Default = $true
+  )
+
+  if ($null -eq $Value) {
+    return $Default
+  }
+  if ($Value -is [bool]) {
+    return [bool]$Value
+  }
+  if ($Value -is [int]) {
+    return ([int]$Value) -ne 0
+  }
+
+  $text = ([string]$Value).Trim()
+  if ([string]::IsNullOrWhiteSpace($text)) {
+    return $Default
+  }
+  if ($text -match "^(true|1|yes|y)$") {
+    return $true
+  }
+  if ($text -match "^(false|0|no|n)$") {
+    return $false
+  }
+
+  return $Default
 }
 
 function Get-DevToolsPort {
@@ -669,6 +706,169 @@ function Get-QuickReport {
   } | ConvertTo-Json -Depth 10
 }
 
+function Get-OffloadDecisionObject {
+  param(
+    [string] $TaskGoal,
+    [bool] $NeedsWorkspace,
+    [int] $EstimatedTokens
+  )
+
+  $lowerGoal = $TaskGoal.ToLowerInvariant()
+  $trivial = $lowerGoal -match "\b(2\s*\+\s*2|add\s+2\s*\+\s*2|what\s+is|time|date|summari[sz]e\s+this\s+short|one\s+line|yes\s+or\s+no)\b"
+  if ((-not $NeedsWorkspace) -and $EstimatedTokens -gt 0 -and $EstimatedTokens -lt 400) {
+    $trivial = $true
+  }
+
+  $workspaceLikely = $NeedsWorkspace -or
+    ($lowerGoal -match "\b(repo|workspace|project|files?|diff|logs?|tests?|build|lint|implement|refactor|debug|apply|continue\s+chat|job\s+search|browser|ui)\b") -or
+    ($EstimatedTokens -ge 2000)
+
+  $shouldOffload = $workspaceLikely -and (-not $trivial)
+  if ($shouldOffload) {
+    [PSCustomObject]@{
+      Decision = "offload-to-antigravity"
+      Reason = "The task appears to benefit from Antigravity inspecting the local workspace or running longer reasoning while Codex reads back a compact artifact."
+      ShouldOffload = $true
+    }
+  } else {
+    [PSCustomObject]@{
+      Decision = "codex-direct"
+      Reason = "The task is small enough that DevTools navigation, project context scanning, and Antigravity startup/agent overhead will likely cost more time and tokens than Codex answering directly."
+      ShouldOffload = $false
+    }
+  }
+}
+
+function Get-HandoffTemplateText {
+  param(
+    [string] $TaskGoal,
+    [string] $TaskWorkspace,
+    [string] $TaskStatusFile,
+    [string] $TaskNextStep
+  )
+
+  if ([string]::IsNullOrWhiteSpace($TaskGoal)) {
+    $TaskGoal = "<goal>"
+  }
+  if ([string]::IsNullOrWhiteSpace($TaskWorkspace)) {
+    $TaskWorkspace = "<workspace/path>"
+  }
+
+  @(
+    "Use this as a compact Antigravity offload handoff:",
+    "",
+    '```text',
+    "Goal: $TaskGoal",
+    "Workspace: $TaskWorkspace",
+    "Constraints: inspect files locally; do not paste full files, full logs, or full source; use search before reading whole files.",
+    "Token rule: work token-efficiently; write progress to $TaskStatusFile; output max 10 bullets plus changed file list.",
+    "Next step: $TaskNextStep",
+    "If blocked: ask one concise question; otherwise continue autonomously.",
+    '```',
+    "",
+    "Codex follow-up rule: do not read the full Antigravity chat. Read only the status artifact, targeted diffs, or a compact visible UI status."
+  ) -join [Environment]::NewLine
+}
+
+function Get-SubmissionGuideText {
+  @(
+    "AntigravitySubmissionGuide:",
+    "1. Verify the target project, conversation, model, and idle composer first.",
+    "2. Fill or type the prompt into the composer only. Do not include submitKey in the fill/type call.",
+    "3. Prefer clicking the visible Send/arrow button after the composer contains the prompt.",
+    "4. If a keyboard submit is required, use a separate key tool call with a simple accepted key such as Enter. Do not use Control+Enter, Ctrl+Enter, or chord strings unless the active tool schema explicitly lists that exact value.",
+    "5. After submitting, verify Antigravity accepted the message by checking for a working/streaming state or a new visible user message.",
+    "6. If the key or click fails once, stop retrying the same submit method. Report the blocker or use handoff-template for manual paste.",
+    "",
+    "Reason: some Codex DevTools tools reject chord strings like Control+Enter with Unknown key, even after the prompt was typed correctly."
+  ) -join [Environment]::NewLine
+}
+
+function Get-DevToolsHealthText {
+  $live = Get-LiveReportObject
+  $pageCount = [int]$live.PageCount
+  $ready = $live.Running -and $pageCount -gt 0
+  $status = if ($ready) { "ready" } else { "not-ready" }
+  $next = if ($ready) {
+    "If antigravity-devtools still says Transport closed, do not retry the same MCP transport. Restart Codex so the DevTools MCP server is re-created, or use handoff-template/manual paste for this turn."
+  } else {
+    "Run repair-live once. If it restarts Antigravity, restart Codex before calling antigravity-devtools again."
+  }
+
+  @(
+    "DevToolsHealth: $status",
+    "Running: $($live.Running)",
+    "DevToolsPort: $($live.DevToolsPort)",
+    "PageCount: $pageCount",
+    "Next: $next",
+    "",
+    "Rule: local helper commands can report health even when antigravity-devtools/list_pages fails with Transport closed."
+  ) -join [Environment]::NewLine
+}
+
+function Get-OffloadAdviceText {
+  $needsWorkspace = ConvertTo-BooleanValue -Value $HasWorkspaceWork -Default $true
+  $decision = Get-OffloadDecisionObject -TaskGoal $Goal -NeedsWorkspace $needsWorkspace -EstimatedTokens $EstimatedCodexInputTokens
+  @(
+    "Decision: $($decision.Decision)",
+    "Reason: $($decision.Reason)",
+    "",
+    "Rules:",
+    "- Use Codex direct for arithmetic, short factual answers, tiny commands, and small summaries.",
+    "- Use Antigravity for long workspace tasks, UI/project continuation, job-search/application work, debugging, implementation, and analysis that would require Codex to read large files or logs.",
+    "- In existing project chats, assume Antigravity may scan attached folders. For small tests, use a blank/no-workspace chat when available or do not offload.",
+    "- If Antigravity unexpectedly starts broad folder exploration for a small task, cancel and report that offload is not token-efficient.",
+    "- When offloading, send a compact handoff and ask Antigravity to write a small status artifact; Codex should read only that artifact or a targeted diff."
+  ) -join [Environment]::NewLine
+}
+
+function Get-PrepareOffloadText {
+  $quick = Get-QuickReport | ConvertFrom-Json
+  $needsWorkspace = ConvertTo-BooleanValue -Value $HasWorkspaceWork -Default $true
+  $decision = Get-OffloadDecisionObject -TaskGoal $Goal -NeedsWorkspace $needsWorkspace -EstimatedTokens $EstimatedCodexInputTokens
+  $recommended = $null
+  if ($quick.Limits -and $quick.Limits.RecommendedAvailable -and @($quick.Limits.RecommendedAvailable).Count -gt 0) {
+    $recommended = @($quick.Limits.RecommendedAvailable)[0]
+  }
+
+  $bestModel = if ($recommended) {
+    "{0} ({1}% remaining)" -f $recommended.DisplayName, $recommended.RemainingPercent
+  } else {
+    "<unknown>"
+  }
+
+  $nextAction = if ($decision.ShouldOffload) {
+    "Use antigravity-devtools only to select the project/chat/model, fill the handoff, and click the Send/arrow button. Then stop monitoring and read only the status artifact or targeted diff."
+  } else {
+    "Do not open or drive Antigravity for this task. Answer or act directly in Codex."
+  }
+
+  $handoff = Get-HandoffTemplateText -TaskGoal $Goal -TaskWorkspace $Workspace -TaskStatusFile $StatusFile -TaskNextStep $NextStep
+  $handoff = $handoff -replace "^Use this as a compact Antigravity offload handoff:\r?\n\r?\n", ""
+
+  @(
+    "FastAntigravityOffloadPlan:",
+    "Decision: $($decision.Decision)",
+    "Reason: $($decision.Reason)",
+    "",
+    "Readiness:",
+    "Installed: $($quick.Setup.Installed)",
+    "Running: $($quick.Setup.Running)",
+    "LiveReady: $($quick.Setup.ReadyForLiveUiInspection)",
+    "PageCount: $($quick.Live.PageCount)",
+    "BestModel: $bestModel",
+    "",
+    "NextAction:",
+    $nextAction,
+    "",
+    "SubmitRule:",
+    "Fill/type the prompt without submitKey. Prefer clicking the visible Send/arrow button. If keyboard submit is required, use a separate simple Enter key call. Never use Control+Enter unless the active tool schema explicitly accepts it.",
+    "",
+    "CompactHandoff:",
+    $handoff
+  ) -join [Environment]::NewLine
+}
+
 function Write-Status {
   $processes = @(Get-AntigravityProcess)
   $devToolsPort = Get-DevToolsPort
@@ -750,6 +950,26 @@ switch ($Command) {
 
   "live" {
     Get-LiveReport
+  }
+
+  "devtools-health" {
+    Get-DevToolsHealthText
+  }
+
+  "submission-guide" {
+    Get-SubmissionGuideText
+  }
+
+  "offload-advice" {
+    Get-OffloadAdviceText
+  }
+
+  "handoff-template" {
+    Get-HandoffTemplateText -TaskGoal $Goal -TaskWorkspace $Workspace -TaskStatusFile $StatusFile -TaskNextStep $NextStep
+  }
+
+  "prepare-offload" {
+    Get-PrepareOffloadText
   }
 
   "setup" {
