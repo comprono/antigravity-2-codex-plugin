@@ -54,10 +54,10 @@ The setup report tells Codex whether Antigravity is installed, whether Node.js i
 
 The plugin registers two MCP servers:
 
-- `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `inspect`, `live`, `limits-summary`, `limits`, `models`, and `privacy`.
+- `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `limits-summary`, `limits`, `models`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
-Codex should call `antigravity-local.quick` first. Use `limits-summary` for normal quota checks and full `limits` only when the complete per-model JSON is needed. Then use `antigravity-devtools` for live project/chat UI work. This keeps the plugin useful even if a session cannot read the skill documentation and avoids wasting tokens on repeated full dumps.
+Codex should call `antigravity-local.quick` first. If `ReadyForLiveUiInspection` is false, call `antigravity-local.repair-live` once before using DevTools. Use `limits-summary` for normal quota checks and full `limits` only when the complete per-model JSON is needed. Then use `antigravity-devtools` for live project/chat UI work. This keeps the plugin useful even if a session cannot read the skill documentation and avoids wasting tokens on repeated full dumps.
 
 ## Usage
 
@@ -77,6 +77,12 @@ Open Antigravity:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2\scripts\antigravity.ps1" open
+```
+
+Repair live DevTools inspection if Antigravity is running but exposes zero pages:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2\scripts\antigravity.ps1" repair-live
 ```
 
 Inspect integration details:

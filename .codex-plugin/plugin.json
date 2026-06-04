@@ -42,6 +42,7 @@
       "Model quota inspection",
       "Live UI inspection",
       "DevTools bridge",
+      "Live DevTools repair",
       "Project and chat inspection",
       "New project and chat handoff",
       "Public repo privacy scan"
@@ -49,6 +50,7 @@
     "defaultPrompt": [
       "Quick check Antigravity 2.0",
       "Open Antigravity 2.0",
+      "Repair Antigravity live inspection",
       "Check Antigravity setup",
       "Show Antigravity model limits",
       "Inspect Antigravity projects",

@@ -33,6 +33,11 @@ const tools = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
+    name: "repair-live",
+    description: "Restart Antigravity and wait for an inspectable DevTools page when live UI control is not ready.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
     name: "inspect",
     description: "Inspect local Antigravity integration details, bundled helpers, and known binaries.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },

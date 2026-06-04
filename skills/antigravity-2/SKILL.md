@@ -24,10 +24,10 @@ Core jobs:
 
 This plugin exposes two MCP servers:
 
-- `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `inspect`, `live`, `limits-summary`, `limits`, `models`, and `privacy`.
+- `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `limits-summary`, `limits`, `models`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
-Prefer `antigravity-local.quick` as the first call because it combines setup, live UI readiness, and a compact model-limit summary. Use `limits-summary` for normal quota checks and full `limits` only when complete per-model JSON is needed. Prefer `antigravity-devtools` for seeing projects/chats, continuing chats, starting new chats, and starting new projects. If this skill file cannot be read in a Codex session, the MCP tools are still enough: call `quick`, then use DevTools for live UI work.
+Prefer `antigravity-local.quick` as the first call because it combines setup, live UI readiness, and a compact model-limit summary. If `ReadyForLiveUiInspection` is false or `PageCount` is zero, call `antigravity-local.repair-live` once before using DevTools. Use `limits-summary` for normal quota checks and full `limits` only when complete per-model JSON is needed. Prefer `antigravity-devtools` for seeing projects/chats, continuing chats, starting new chats, and starting new projects. If this skill file cannot be read in a Codex session, the MCP tools are still enough: call `quick`, repair live inspection if needed, then use DevTools for live UI work.
 
 ## Requirements
 
@@ -53,7 +53,7 @@ Use the setup report to decide the next step:
 - If `Node.Found` is false, install or expose Node.js on `PATH` before using the DevTools bridge.
 - If `AntigravityRunning` is false, run the `open` command.
 - If `ReadyForModelLimits` is false after opening Antigravity, wait a few seconds and rerun `setup`.
-- If `ReadyForLiveUiInspection` is false, verify `DevToolsActivePort` and use the Browser/Computer Use fallback only if DevTools cannot connect.
+- If `ReadyForLiveUiInspection` is false, run `repair-live` once. It restarts Antigravity, clears a stale `DevToolsActivePort`, and waits for inspectable pages. Use Browser/Computer Use fallback only if repair still cannot connect.
 
 ## Helper Commands
 
@@ -73,6 +73,12 @@ Open Antigravity:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" open
+```
+
+Repair live DevTools inspection if Antigravity is running but exposes zero pages:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$HOME\plugins\antigravity-2\scripts\antigravity.ps1" repair-live
 ```
 
 Inspect integration details:

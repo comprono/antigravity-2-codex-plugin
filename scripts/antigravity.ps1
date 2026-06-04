@@ -1,6 +1,6 @@
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("status", "open", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy")]
+  [ValidateSet("status", "open", "repair-live", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy")]
   [string] $Command = "status"
 )
 
@@ -39,6 +39,95 @@ function Get-DevToolsPages {
     }
   } catch {
     @()
+  }
+}
+
+function Wait-DevToolsPages {
+  param(
+    [int] $TimeoutSeconds = 20
+  )
+
+  $deadline = [datetime]::UtcNow.AddSeconds($TimeoutSeconds)
+  do {
+    $pages = @(Get-DevToolsPages)
+    if ($pages.Count -gt 0) {
+      return $pages
+    }
+    Start-Sleep -Milliseconds 500
+  } while ([datetime]::UtcNow -lt $deadline)
+
+  return @()
+}
+
+function Stop-AntigravityForRepair {
+  $processes = @(Get-AntigravityProcess)
+  foreach ($process in $processes) {
+    try {
+      if ($process.MainWindowHandle -ne 0) {
+        [void]$process.CloseMainWindow()
+      }
+    } catch {
+      # Fall through to the bounded hard stop below.
+    }
+  }
+
+  if ($processes.Count -gt 0) {
+    Start-Sleep -Seconds 3
+  }
+
+  $remaining = @(Get-AntigravityProcess)
+  foreach ($process in $remaining) {
+    try {
+      Stop-Process -Id $process.Id -Force -ErrorAction Stop
+    } catch {
+      # Ignore processes that exited between enumeration and stop.
+    }
+  }
+}
+
+function Start-AntigravityAndWait {
+  param(
+    [int] $TimeoutSeconds = 20
+  )
+
+  if (-not (Test-Path -LiteralPath $exePath)) {
+    throw "Antigravity.exe was not found at $exePath"
+  }
+
+  if (Test-Path -LiteralPath $devToolsPortFile) {
+    Remove-Item -LiteralPath $devToolsPortFile -Force -ErrorAction SilentlyContinue
+  }
+
+  Start-Process -FilePath $exePath -WorkingDirectory $installRoot
+  [void](Wait-DevToolsPages -TimeoutSeconds $TimeoutSeconds)
+}
+
+function Repair-LiveDevTools {
+  $before = Get-LiveReportObject
+  if ($before.Running -and $before.PageCount -gt 0) {
+    return [PSCustomObject]@{
+      Source = "Antigravity live DevTools repair"
+      GeneratedAtUtc = [datetime]::UtcNow.ToString("o")
+      Action = "none"
+      Reason = "Live DevTools already has pages."
+      Before = $before
+      After = $before
+      ReadyForLiveUiInspection = $true
+    }
+  }
+
+  Stop-AntigravityForRepair
+  Start-AntigravityAndWait -TimeoutSeconds 25
+  $after = Get-LiveReportObject
+
+  [PSCustomObject]@{
+    Source = "Antigravity live DevTools repair"
+    GeneratedAtUtc = [datetime]::UtcNow.ToString("o")
+    Action = "restart-antigravity"
+    Reason = "Live DevTools had no inspectable pages."
+    Before = $before
+    After = $after
+    ReadyForLiveUiInspection = [bool]($after.Running -and $after.PageCount -gt 0)
   }
 }
 
@@ -555,7 +644,7 @@ function Get-QuickReport {
       $null
     }
     LimitsError = $limitsError
-    NextToolHint = "Use antigravity-local quick first, antigravity-local limits-summary for compact quota checks, antigravity-local limits only when full per-model JSON is needed, then antigravity-devtools for UI actions."
+    NextToolHint = "Use antigravity-local quick first. If ReadyForLiveUiInspection is false, call repair-live once. Use limits-summary for compact quota checks, full limits only when needed, then antigravity-devtools for UI actions."
   } | ConvertTo-Json -Depth 10
 }
 
@@ -594,6 +683,10 @@ switch ($Command) {
     }
 
     Write-Status
+  }
+
+  "repair-live" {
+    Repair-LiveDevTools | ConvertTo-Json -Depth 10
   }
 
   "inspect" {
