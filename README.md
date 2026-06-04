@@ -57,7 +57,7 @@ The plugin registers two MCP servers:
 - `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `submission-guide`, `prepare-offload`, `submit-offload`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
-Codex should call `antigravity-local.submit-offload` first when the correct Antigravity project/chat is already selected and the goal is to hand work to Antigravity with minimum friction. It prepares the compact handoff and submits it through direct CDP, avoiding repeated `list_pages`, snapshots, fill, key, and evaluate calls. Use `antigravity-local.prepare-offload` when Codex should show the plan first or when the selected chat is uncertain. For nontrivial workspace, repo, browser, UI, research, planning, debugging, review, implementation, and job-application work, the intended cost split is: Antigravity explores and works locally; Codex plans, gates safety, reviews final changes, and summarizes. Use `antigravity-local.quick` for general setup checks. If `ReadyForLiveUiInspection` is false, call `antigravity-local.repair-live` once before using DevTools. If repair restarts Antigravity, an already-started DevTools MCP connection may need to reconnect to the new port. If `antigravity-devtools` fails with `Transport closed`, call `antigravity-local.devtools-health`; do not keep retrying `list_pages` in the same broken transport. Use `limits-summary` for normal quota checks and full `limits` only when the complete per-model JSON is needed.
+Codex should call `antigravity-local.submit-offload` first when the correct Antigravity project/chat is already selected and the goal is to hand work to Antigravity with minimum friction. It prepares the compact handoff and submits it through direct CDP, avoiding repeated `list_pages`, snapshots, fill, key, and evaluate calls. If the MCP tool list is stale and does not show `submit-offload`, use the PowerShell helper `antigravity.ps1 submit-offload` before falling back to DevTools choreography. Use `antigravity-local.prepare-offload` when Codex should show the plan first or when the selected chat is uncertain. For nontrivial workspace, repo, browser, UI, research, planning, debugging, review, implementation, and job-application work, the intended cost split is: Antigravity explores and works locally; Codex plans, gates safety, reviews final changes, and summarizes. Use `antigravity-local.quick` for general setup checks. If `ReadyForLiveUiInspection` is false, call `antigravity-local.repair-live` once before using DevTools. If repair restarts Antigravity, an already-started DevTools MCP connection may need to reconnect to the new port. If `antigravity-devtools` fails with `Transport closed`, call `antigravity-local.devtools-health`; do not keep retrying `list_pages` in the same broken transport. Use `limits-summary` for normal quota checks and full `limits` only when the complete per-model JSON is needed.
 
 ## Usage
 
@@ -154,6 +154,12 @@ If a Codex session cannot see MCP tools and can only run shell commands, use the
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2\scripts\antigravity.ps1" prepare-offload -Goal "<goal>" -Workspace "<path>" -StatusFile "notes/antigravity-status.md" -NextStep "<next step>"
+```
+
+For selected-chat direct submission through the PowerShell helper:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2\scripts\antigravity.ps1" submit-offload -Goal "<goal>" -Workspace "<path>" -StatusFile "notes/antigravity-status.md" -NextStep "<next step>" -ExpectedProject "<project text>" -ExpectedChat "<chat text>" -Submit true
 ```
 
 If UI submission is blocked by a stale DevTools port, use `antigravity-local.handoff-template` to generate the compact prompt and avoid repeated CDP probing. Restart Codex or paste the generated handoff manually so the next session attaches to the current Antigravity port.

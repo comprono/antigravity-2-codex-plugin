@@ -1,12 +1,15 @@
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("status", "open", "repair-live", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy", "devtools-health", "submission-guide", "offload-advice", "handoff-template", "prepare-offload")]
+  [ValidateSet("status", "open", "repair-live", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy", "devtools-health", "submission-guide", "offload-advice", "handoff-template", "prepare-offload", "submit-offload")]
   [string] $Command = "status",
 
   [string] $Goal = "",
   [string] $Workspace = "",
   [string] $StatusFile = "notes/antigravity-status.md",
   [string] $NextStep = "Inspect the relevant files and write a compact status checkpoint.",
+  [string] $ExpectedProject = "",
+  [string] $ExpectedChat = "",
+  [object] $Submit = $false,
   [object] $HasWorkspaceWork = $true,
   [int] $EstimatedCodexInputTokens = 2000
 )
@@ -869,6 +872,35 @@ function Get-PrepareOffloadText {
   ) -join [Environment]::NewLine
 }
 
+function Invoke-SubmitOffload {
+  $submitValue = ConvertTo-BooleanValue -Value $Submit -Default $false
+  $localMcpScript = Join-Path $PSScriptRoot "antigravity-local-mcp.js"
+  if (-not (Test-Path -LiteralPath $localMcpScript)) {
+    throw "antigravity-local-mcp.js was not found at $localMcpScript"
+  }
+
+  $payload = [PSCustomObject]@{
+    goal = $Goal
+    workspace = $Workspace
+    statusFile = $StatusFile
+    nextStep = $NextStep
+    expectedProject = $ExpectedProject
+    expectedChat = $ExpectedChat
+    submit = $submitValue
+  } | ConvertTo-Json -Compress
+
+  $payloadFile = Join-Path ([System.IO.Path]::GetTempPath()) ("antigravity-submit-offload-{0}.json" -f ([guid]::NewGuid().ToString("N")))
+  try {
+    [System.IO.File]::WriteAllText($payloadFile, $payload, [System.Text.UTF8Encoding]::new($false))
+    & node $localMcpScript submit-offload-cli --json-file $payloadFile
+    if ($LASTEXITCODE -ne 0) {
+      throw "submit-offload failed with exit code $LASTEXITCODE"
+    }
+  } finally {
+    Remove-Item -LiteralPath $payloadFile -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Write-Status {
   $processes = @(Get-AntigravityProcess)
   $devToolsPort = Get-DevToolsPort
@@ -970,6 +1002,10 @@ switch ($Command) {
 
   "prepare-offload" {
     Get-PrepareOffloadText
+  }
+
+  "submit-offload" {
+    Invoke-SubmitOffload
   }
 
   "setup" {

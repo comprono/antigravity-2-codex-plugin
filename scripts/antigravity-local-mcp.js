@@ -600,6 +600,31 @@ async function handleRequest(message) {
   }
 }
 
+if (process.argv[2] === "submit-offload-cli") {
+  let args = {};
+  try {
+    if (process.argv[3] === "--json-file") {
+      args = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
+    } else {
+      args = process.argv[3] ? JSON.parse(process.argv[3]) : {};
+    }
+  } catch (error) {
+    console.error(`Invalid submit-offload JSON: ${error?.message || String(error)}`);
+    process.exit(2);
+  }
+
+  submitOffloadToCurrentChat(args)
+    .then((text) => {
+      console.log(text);
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error(error?.message || String(error));
+      process.exit(1);
+    });
+  return;
+}
+
 let buffer = Buffer.alloc(0);
 
 process.stdin.on("data", (chunk) => {
