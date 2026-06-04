@@ -454,11 +454,13 @@ async function submitOffloadToCurrentChat(args = {}) {
     })
     .sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right)[0];
   const sendButton = labeled || nearby;
-  if (!sendButton) {
-    return { ok: true, stage: "filled-no-send-button", submitted: false, promptLength: prompt.length };
-  }
-  sendButton.click();
-  return { ok: true, stage: "submitted", submitted: true, promptLength: prompt.length };
+  return {
+    ok: true,
+    stage: "filled-ready-for-enter",
+    submitted: false,
+    promptLength: prompt.length,
+    hasSendButton: Boolean(sendButton)
+  };
 })()
 `;
 
@@ -468,7 +470,53 @@ async function submitOffloadToCurrentChat(args = {}) {
       awaitPromise: true,
       returnByValue: true,
     });
-    const value = result?.result?.value || {};
+    let value = result?.result?.value || {};
+    if (submit && value.ok === true && value.stage === "filled-ready-for-enter") {
+      await client.send("Input.dispatchKeyEvent", {
+        type: "rawKeyDown",
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13,
+        unmodifiedText: "\r",
+        text: "\r",
+      });
+      await client.send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const afterEnter = await client.send("Runtime.evaluate", {
+        expression: `
+(() => {
+  const visibleText = document.body ? document.body.innerText || "" : "";
+  const busy = /working|worked for|stop|cancel|running|thinking/i.test(visibleText);
+  const composer = Array.from(document.querySelectorAll('textarea,input,[contenteditable="true"],[role="textbox"],[role="combobox"]'))
+    .filter((el) => {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+    })
+    .sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
+  const composerText = composer ? (composer.value || composer.innerText || composer.textContent || "") : "";
+  return { busy, composerStillHasPrompt: composerText.includes(${jsString(handoff.slice(0, 80))}) };
+})()
+`,
+        awaitPromise: true,
+        returnByValue: true,
+      });
+      const afterValue = afterEnter?.result?.value || {};
+      value = {
+        ...value,
+        stage: afterValue.composerStillHasPrompt ? "enter-dispatched-unconfirmed" : "enter-submitted",
+        submitted: !afterValue.composerStillHasPrompt || afterValue.busy === true,
+        enterDispatched: true,
+        busy: afterValue.busy === true,
+      };
+    }
     return [
       "SubmitOffloadResult:",
       `DevToolsPort: ${port}`,
