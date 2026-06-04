@@ -43,9 +43,14 @@ function Get-DevToolsPages {
 }
 
 function Get-LanguageServerProcess {
-  @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -eq "language_server.exe" -or $_.CommandLine -like "*language_server.exe*" } |
-    Select-Object -First 1)
+  $proc = Get-CimInstance Win32_Process -Filter "Name = 'language_server.exe'" -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+  if (-not $proc) {
+    $proc = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+      Where-Object { $_.CommandLine -like "*language_server.exe*" } |
+      Select-Object -First 1
+  }
+  $proc
 }
 
 function Get-LanguageServerInfo {
@@ -135,7 +140,14 @@ function Invoke-AntigravityGrpcJson {
       $requestStream.Dispose()
     }
 
-    $response = $request.GetResponse()
+    try {
+      $response = $request.GetResponse()
+    } catch [System.Net.WebException] {
+      if ($_.Exception.Response) {
+        $_.Exception.Response.Dispose()
+      }
+      throw $_
+    }
     try {
       $memory = New-Object System.IO.MemoryStream
       $response.GetResponseStream().CopyTo($memory)
@@ -297,7 +309,12 @@ function Get-PrivacyReport {
 
   $findings = @()
   $scanFiles = @(Get-ChildItem -LiteralPath $repoRoot -Recurse -File -Force -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -notmatch "\\.git\\" })
+    Where-Object {
+      $_.FullName -notmatch "\\.git\\" -and
+      $_.FullName -notmatch "\\node_modules\\" -and
+      $_.FullName -notmatch "\\.pytest_cache\\" -and
+      $_.FullName -notmatch "\\__pycache__\\"
+    })
   foreach ($pattern in $patterns) {
     $matches = @($scanFiles |
       Select-String -Pattern $pattern -ErrorAction SilentlyContinue |
@@ -354,7 +371,7 @@ function Convert-QuotaInfo {
     }
   } elseif ($resetTimeUtc) {
     try {
-      if ([datetime]::Parse($resetTimeUtc).ToUniversalTime() -gt [datetime]::UtcNow) {
+      if ([System.DateTimeOffset]::Parse($resetTimeUtc).UtcDateTime -gt [datetime]::UtcNow) {
         $status = "exhausted"
       }
     } catch {
@@ -390,7 +407,10 @@ function Get-AntigravityModelsObject {
   $creditsResponse = Invoke-AntigravityGrpcJson -Port $server.HttpsPort -CsrfToken $server.CsrfToken -Method "GetLoadCodeAssist" -Message @{ forceRefresh = $false }
 
   $models = @()
-  $rawModels = $modelsResponse.response.models
+  $rawModels = $null
+  if ($modelsResponse -and $modelsResponse.response) {
+    $rawModels = $modelsResponse.response.models
+  }
   if ($rawModels) {
     foreach ($modelId in @($rawModels.PSObject.Properties.Name | Sort-Object)) {
       $model = $rawModels.$modelId
@@ -406,7 +426,10 @@ function Get-AntigravityModelsObject {
   }
 
   $creditInfo = $null
-  $tier = $creditsResponse.response.currentTier
+  $tier = $null
+  if ($creditsResponse -and $creditsResponse.response) {
+    $tier = $creditsResponse.response.currentTier
+  }
   $availableCredits = @()
   if ($tier -and $tier.PSObject.Properties.Name -contains "availableCredits") {
     $availableCredits = @($tier.availableCredits)
