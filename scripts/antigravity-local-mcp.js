@@ -53,6 +53,11 @@ const tools = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
+    name: "submission-guide",
+    description: "Compact guidance for reliably submitting Antigravity chat prompts through DevTools without invalid key names.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
     name: "limits-summary",
     description: "Preferred quota check. Compact model availability summary without dumping full per-model JSON.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -227,6 +232,20 @@ function buildDevToolsHealthAdvice(result) {
   ].join("\n");
 }
 
+function buildSubmissionGuide() {
+  return [
+    "AntigravitySubmissionGuide:",
+    "1. Verify the target project, conversation, model, and idle composer first.",
+    "2. Fill or type the prompt into the composer only. Do not include submitKey in the fill/type call.",
+    "3. Prefer clicking the visible Send/arrow button after the composer contains the prompt.",
+    "4. If a keyboard submit is required, use a separate key tool call with a simple accepted key such as Enter. Do not use Control+Enter, Ctrl+Enter, or chord strings unless the active tool schema explicitly lists that exact value.",
+    "5. After submitting, verify Antigravity accepted the message by checking for a working/streaming state or a new visible user message.",
+    "6. If the key or click fails once, stop retrying the same submit method. Report the blocker or use handoff-template for manual paste.",
+    "",
+    "Reason: some Codex DevTools tools reject chord strings like Control+Enter with Unknown key, even after the prompt was typed correctly.",
+  ].join("\n");
+}
+
 async function handleRequest(message) {
   const { id, method, params } = message;
 
@@ -273,6 +292,11 @@ async function handleRequest(message) {
         const result = await runHelper("live");
         const text = `${buildDevToolsHealthAdvice(result)}\n\nRaw live report:\n${JSON.stringify(result, null, 2)}`;
         sendResult(id, { content: [{ type: "text", text }] });
+        return;
+      }
+
+      if (name === "submission-guide") {
+        sendResult(id, { content: [{ type: "text", text: buildSubmissionGuide() }] });
         return;
       }
 

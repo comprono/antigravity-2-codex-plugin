@@ -54,7 +54,7 @@ The setup report tells Codex whether Antigravity is installed, whether Node.js i
 
 The plugin registers two MCP servers:
 
-- `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
+- `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `submission-guide`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
 Codex should call `antigravity-local.quick` first. If `ReadyForLiveUiInspection` is false, call `antigravity-local.repair-live` once before using DevTools. If repair restarts Antigravity, an already-started DevTools MCP connection may need to reconnect to the new port. If `antigravity-devtools` fails with `Transport closed`, call `antigravity-local.devtools-health`; do not keep retrying `list_pages` in the same broken transport. Use `limits-summary` for normal quota checks and full `limits` only when the complete per-model JSON is needed. Then use `antigravity-devtools` for live project/chat UI work only after the transport is healthy. This keeps the plugin useful even if a session cannot read the skill documentation and avoids wasting tokens on repeated full dumps.
@@ -129,6 +129,8 @@ This plugin intentionally combines two local surfaces:
 
 For chat actions, Codex should verify the target project, conversation, and selected model before sending anything. For new projects or new chats, Codex should use the visible Antigravity controls through DevTools automation and report whether Antigravity accepted the action or showed an error/quota state.
 
+For prompt submission, Codex should call `antigravity-local.submission-guide` or follow the same rule: fill/type the prompt without a `submitKey`, then click the visible Send/arrow button. If a keyboard submit is required, use a separate key call with a simple accepted key such as `Enter`. Do not use `Control+Enter`, `Ctrl+Enter`, or chord strings unless the active tool schema explicitly lists that exact value; some DevTools tools reject those strings with `Unknown key`.
+
 ## Token-Saving Offload Pattern
 
 Use this plugin to make Codex the router and verifier while Antigravity does the long work. Codex should avoid reading huge files, full logs, or full Antigravity chat transcripts. Instead, Codex sends Antigravity a compact handoff, lets Antigravity inspect the workspace locally, and reads back only a small artifact or status checkpoint.
@@ -147,7 +149,7 @@ Recommended flow:
 3. Run `antigravity-local.offload-advice` with the goal and continue only when it returns `offload-to-antigravity`.
 4. Run `antigravity-local.limits-summary` instead of full `limits`.
 5. Use `antigravity-devtools` to verify the project, chat, model, idle composer, and whether workspace context is appropriate.
-6. Send Antigravity a compact handoff prompt with the goal, workspace path, constraints, next step, and output format.
+6. Use `antigravity-local.submission-guide`, then send Antigravity a compact handoff prompt with the goal, workspace path, constraints, next step, and output format.
 7. Ask Antigravity to write progress to a small artifact such as `notes/antigravity-status.md`, `plans/antigravity-next.md`, or `reports/antigravity-result.json`.
 8. Codex reads only that artifact, a targeted diff, or a compact visible UI status, then summarizes for the user.
 

@@ -24,7 +24,7 @@ Core jobs:
 
 This plugin exposes two MCP servers:
 
-- `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
+- `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `submission-guide`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
 Prefer `antigravity-local.quick` as the first call because it combines setup, live UI readiness, and a compact model-limit summary. If `ReadyForLiveUiInspection` is false or `PageCount` is zero, call `antigravity-local.repair-live` once before using DevTools. If `repair-live` restarts Antigravity, do not keep using an already-started stale DevTools MCP connection; let it reconnect to the new port before UI calls. If `antigravity-devtools` fails with `Transport closed`, do not repeatedly call `list_pages` in that session. Call `antigravity-local.devtools-health`; if it reports pages are ready, restart Codex to recreate the DevTools MCP transport or use `handoff-template` for a manual paste this turn. Use `limits-summary` for normal quota checks and full `limits` only when complete per-model JSON is needed. Prefer `antigravity-devtools` for seeing projects/chats, continuing chats, starting new chats, and starting new projects only after the transport is healthy. If this skill file cannot be read in a Codex session, the MCP tools are still enough: call `quick`, repair live inspection if needed, then use DevTools for live UI work.
@@ -111,6 +111,12 @@ Check DevTools transport health after `Transport closed`:
 Call antigravity-local.devtools-health.
 ```
 
+Check how to submit a chat prompt without invalid key names:
+
+```text
+Call antigravity-local.submission-guide.
+```
+
 Report model limits:
 
 ```powershell
@@ -179,6 +185,14 @@ Before submitting:
 - Check `models` if the user asks about limits or if a quota warning is visible.
 
 Then paste the user's instruction into the composer and submit it. Report whether Antigravity accepted the message, started working, requested confirmation, or showed a quota/error state.
+
+Submission reliability:
+
+- Fill or type the prompt first without a `submitKey`.
+- Prefer clicking the visible Send/arrow button after the prompt is in the composer.
+- If a keyboard submit is needed, use a separate key call with a simple accepted key such as `Enter`.
+- Do not use `Control+Enter`, `Ctrl+Enter`, or chord strings unless the active tool schema explicitly lists that exact value. Some DevTools tools reject those strings with `Unknown key`.
+- After submission, verify a new user message or working state. If one submit method fails once, stop retrying the same method and use `handoff-template` or report the blocker.
 
 ### Start A New Chat In An Existing Project
 
@@ -254,7 +268,7 @@ Preferred flow:
 3. Run `antigravity-local.offload-advice` with the goal. Continue only if the decision is `offload-to-antigravity`.
 4. Run `antigravity-local.limits-summary`; avoid full `limits` unless model-level JSON is actually needed.
 5. Use `antigravity-devtools` to verify the target project, chat, model, idle composer, and whether workspace context is appropriate.
-6. Send Antigravity a compact handoff prompt with only the goal, workspace/path, constraints, next step, and required output format.
+6. Use `antigravity-local.submission-guide`, then send Antigravity a compact handoff prompt with only the goal, workspace/path, constraints, next step, and required output format.
 7. Ask Antigravity to inspect files locally, write progress/results to a small status artifact, and avoid pasting full files or logs.
 8. Stop monitoring every step. Wait until Antigravity visibly stops or writes the status artifact.
 9. Read only the small artifact or changed-file list, then summarize to the user in a few bullets.
