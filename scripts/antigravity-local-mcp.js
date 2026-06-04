@@ -58,6 +58,23 @@ const tools = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
+    name: "prepare-offload",
+    description: "One-call fast path: decide offload, check live/model readiness, generate the compact handoff, and give submit instructions.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "Task goal for Antigravity." },
+        workspace: { type: "string", description: "Local workspace path or Antigravity project name." },
+        statusFile: { type: "string", description: "Small artifact Antigravity should write.", default: "notes/antigravity-status.md" },
+        nextStep: { type: "string", description: "Specific next action.", default: "Inspect the relevant files and write a compact status checkpoint." },
+        hasWorkspaceWork: { type: "boolean", description: "Whether the task needs files, diffs, logs, browser state, or project context.", default: true },
+        estimatedCodexInputTokens: { type: "number", description: "Rough Codex tokens needed if handled directly.", default: 2000 },
+      },
+      required: ["goal"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "limits-summary",
     description: "Preferred quota check. Compact model availability summary without dumping full per-model JSON.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -182,7 +199,7 @@ function buildHandoffTemplate(args = {}) {
   ].join("\n");
 }
 
-function buildOffloadAdvice(args = {}) {
+function getOffloadDecision(args = {}) {
   const goal = String(args.goal || "").trim();
   const hasWorkspaceWork = Boolean(args.hasWorkspaceWork);
   const estimatedCodexInputTokens = Number(args.estimatedCodexInputTokens || 0);
@@ -199,6 +216,11 @@ function buildOffloadAdvice(args = {}) {
     ? "The task appears to benefit from Antigravity inspecting the local workspace or running longer reasoning while Codex reads back a compact artifact."
     : "The task is small enough that DevTools navigation, project context scanning, and Antigravity startup/agent overhead will likely cost more time and tokens than Codex answering directly.";
 
+  return { decision, reason, shouldOffload };
+}
+
+function buildOffloadAdvice(args = {}) {
+  const { decision, reason } = getOffloadDecision(args);
   return [
     `Decision: ${decision}`,
     `Reason: ${reason}`,
@@ -209,6 +231,43 @@ function buildOffloadAdvice(args = {}) {
     "- In existing project chats, assume Antigravity may scan attached folders. For small tests, use a blank/no-workspace chat when available or do not offload.",
     "- If Antigravity unexpectedly starts broad folder exploration for a small task, cancel and report that offload is not token-efficient.",
     "- When offloading, send a compact handoff and ask Antigravity to write a small status artifact; Codex should read only that artifact or a targeted diff.",
+  ].join("\n");
+}
+
+function buildPrepareOffload(args = {}, quick = null) {
+  const decision = getOffloadDecision(args);
+  const handoff = buildHandoffTemplate(args).replace(/^Use this as a compact Antigravity offload handoff:\n\n/, "");
+  const setup = quick?.Setup || {};
+  const live = quick?.Live || {};
+  const recommended = quick?.Limits?.RecommendedAvailable?.[0] || null;
+  const readiness = [
+    `Installed: ${setup.Installed === true}`,
+    `Running: ${setup.Running === true}`,
+    `LiveReady: ${setup.ReadyForLiveUiInspection === true}`,
+    `PageCount: ${live.PageCount ?? "<unknown>"}`,
+    `BestModel: ${recommended ? `${recommended.DisplayName || recommended.Id} (${recommended.RemainingPercent ?? "?"}% remaining)` : "<unknown>"}`,
+  ].join("\n");
+
+  const nextAction = decision.shouldOffload
+    ? "Use antigravity-devtools only to select the project/chat/model, fill the handoff, and click the Send/arrow button. Then stop monitoring and read only the status artifact or targeted diff."
+    : "Do not open or drive Antigravity for this task. Answer or act directly in Codex.";
+
+  return [
+    "FastAntigravityOffloadPlan:",
+    `Decision: ${decision.decision}`,
+    `Reason: ${decision.reason}`,
+    "",
+    "Readiness:",
+    readiness,
+    "",
+    "NextAction:",
+    nextAction,
+    "",
+    "SubmitRule:",
+    "Fill/type the prompt without submitKey. Prefer clicking the visible Send/arrow button. If keyboard submit is required, use a separate simple Enter key call. Never use Control+Enter unless the active tool schema explicitly accepts it.",
+    "",
+    "CompactHandoff:",
+    handoff,
   ].join("\n");
 }
 
@@ -297,6 +356,13 @@ async function handleRequest(message) {
 
       if (name === "submission-guide") {
         sendResult(id, { content: [{ type: "text", text: buildSubmissionGuide() }] });
+        return;
+      }
+
+      if (name === "prepare-offload") {
+        const quick = await runHelper("quick");
+        const text = buildPrepareOffload(params?.arguments || {}, quick);
+        sendResult(id, { content: [{ type: "text", text }] });
         return;
       }
 

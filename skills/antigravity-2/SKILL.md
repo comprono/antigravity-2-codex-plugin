@@ -24,10 +24,10 @@ Core jobs:
 
 This plugin exposes two MCP servers:
 
-- `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `submission-guide`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
+- `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `submission-guide`, `prepare-offload`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
-Prefer `antigravity-local.quick` as the first call because it combines setup, live UI readiness, and a compact model-limit summary. If `ReadyForLiveUiInspection` is false or `PageCount` is zero, call `antigravity-local.repair-live` once before using DevTools. If `repair-live` restarts Antigravity, do not keep using an already-started stale DevTools MCP connection; let it reconnect to the new port before UI calls. If `antigravity-devtools` fails with `Transport closed`, do not repeatedly call `list_pages` in that session. Call `antigravity-local.devtools-health`; if it reports pages are ready, restart Codex to recreate the DevTools MCP transport or use `handoff-template` for a manual paste this turn. Use `limits-summary` for normal quota checks and full `limits` only when complete per-model JSON is needed. Prefer `antigravity-devtools` for seeing projects/chats, continuing chats, starting new chats, and starting new projects only after the transport is healthy. If this skill file cannot be read in a Codex session, the MCP tools are still enough: call `quick`, repair live inspection if needed, then use DevTools for live UI work.
+Prefer `antigravity-local.prepare-offload` as the first call when the user wants Codex to save tokens, ride on Antigravity, or hand off workspace work. It combines offload decision, quick readiness, best model hint, compact handoff text, and submission instructions in one low-token result. Use `antigravity-local.quick` for general setup checks. If `ReadyForLiveUiInspection` is false or `PageCount` is zero, call `antigravity-local.repair-live` once before using DevTools. If `repair-live` restarts Antigravity, do not keep using an already-started stale DevTools MCP connection; let it reconnect to the new port before UI calls. If `antigravity-devtools` fails with `Transport closed`, do not repeatedly call `list_pages` in that session. Call `antigravity-local.devtools-health`; if it reports pages are ready, restart Codex to recreate the DevTools MCP transport or use `handoff-template` for a manual paste this turn. Use `limits-summary` for normal quota checks and full `limits` only when complete per-model JSON is needed. Prefer `antigravity-devtools` for seeing projects/chats, continuing chats, starting new chats, and starting new projects only after the transport is healthy. If this skill file cannot be read in a Codex session, the MCP tools are still enough: call `prepare-offload` for offload work, repair live inspection if needed, then use DevTools only for minimal UI work.
 
 ## Requirements
 
@@ -91,6 +91,12 @@ Check whether a task should be offloaded before using UI tokens:
 
 ```text
 Call antigravity-local.offload-advice with goal, hasWorkspaceWork, and estimatedCodexInputTokens.
+```
+
+Prepare the whole token-saving handoff in one call:
+
+```text
+Call antigravity-local.prepare-offload with goal, workspace, statusFile, nextStep, hasWorkspaceWork, and estimatedCodexInputTokens.
 ```
 
 Inspect integration details:
@@ -261,7 +267,14 @@ Core rule:
 
 Do not copy large files, long logs, full source, or full Antigravity chat transcripts into Codex. Savings happen only when Codex sends compact instructions, lets Antigravity inspect the workspace locally, and reads back a small artifact or status checkpoint.
 
-Preferred flow:
+Fast preferred flow:
+
+1. Call `antigravity-local.prepare-offload`.
+2. If the decision is `codex-direct`, do not open or drive Antigravity.
+3. If the decision is `offload-to-antigravity`, use `antigravity-devtools` only for the minimum UI actions: select project/chat/model, fill the compact handoff, and click Send.
+4. Stop watching every step. Read only the requested status artifact, targeted diff, or compact visible status.
+
+Detailed fallback flow:
 
 1. Run `antigravity-local.quick`.
 2. If `ReadyForLiveUiInspection` is false, run `antigravity-local.repair-live` once.
