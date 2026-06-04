@@ -20,6 +20,15 @@ Core jobs:
 - Start a new project and then start a chat there.
 - Report quota, model, UI, or submission errors without repeatedly retrying.
 
+Primary operating model:
+
+- Codex delegates nontrivial work to Antigravity first.
+- Codex waits instead of doing the same exploration itself.
+- Codex reads only compact status artifacts, targeted diffs, or concise visible status.
+- Codex reviews Antigravity's result, identifies gaps, and gives Antigravity the next compact improvement task.
+- Codex performs final user-facing synthesis, safety checks, and narrow code patches only when that is cheaper or higher quality than another Antigravity pass.
+- Codex should not duplicate Antigravity's file reading, broad search, browser operation, or long reasoning unless Antigravity is blocked, unavailable, or the task is tiny.
+
 ## MCP Tool Surfaces
 
 This plugin exposes two MCP servers:
@@ -280,7 +289,8 @@ Do offload:
 Cost split:
 
 - Antigravity explores, searches, reads files, inspects UI, drafts plans, and writes status artifacts.
-- Codex decides whether the handoff is safe, patches final code when needed, verifies diffs/tests, and explains the result to the user.
+- Codex gives Antigravity tasks, waits, reviews the compact output, tells Antigravity how to improve, verifies final diffs/tests, and explains the result to the user.
+- If Antigravity output is incomplete, Codex should usually send a short follow-up task back to Antigravity rather than expanding its own context with broad file reads.
 
 Important lesson from project chats: Antigravity may automatically inspect attached folders before answering, even for a tiny prompt. That is useful for real project work but wasteful for tests like `2+2`. If Antigravity starts broad folder exploration for a small task, cancel it and report that offload is not token-efficient.
 
@@ -299,6 +309,7 @@ Fast preferred flow:
 3. If the selected chat is uncertain, call `antigravity-local.prepare-offload`, then use DevTools only to select the project/chat/model.
 4. If the decision is `codex-direct`, do not open or drive Antigravity.
 5. After a successful `submit-offload`, stop watching every step. Read only the requested status artifact, targeted diff, or compact visible status.
+6. If the artifact is weak, issue another compact Antigravity follow-up with the exact missing point. Do not pull broad context back into Codex unless needed for final verification.
 
 Detailed fallback flow:
 

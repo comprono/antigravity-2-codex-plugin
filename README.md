@@ -129,6 +129,8 @@ This plugin intentionally combines two local surfaces:
 
 For chat actions, Codex should verify the target project, conversation, and selected model before sending anything. For new projects or new chats, Codex should use the visible Antigravity controls through DevTools automation and report whether Antigravity accepted the action or showed an error/quota state.
 
+For nontrivial work, Codex should act as the orchestrator, not the main worker. Codex gives Antigravity compact tasks, waits, reads only status artifacts or targeted diffs, reviews the result, and sends the next improvement task back to Antigravity. Codex should avoid duplicating Antigravity's broad file reading, browser operation, and long reasoning unless Antigravity is blocked or final verification requires it.
+
 For prompt submission, Codex should call `antigravity-local.submission-guide` or follow the same rule: fill/type the prompt without a `submitKey`, then click the visible Send/arrow button. If a keyboard submit is required, use a separate key call with a simple accepted key such as `Enter`. Do not use `Control+Enter`, `Ctrl+Enter`, or chord strings unless the active tool schema explicitly lists that exact value; some DevTools tools reject those strings with `Unknown key`.
 
 ## Token-Saving Offload Pattern
@@ -148,7 +150,9 @@ Recommended flow:
 2. If the selected chat is uncertain, run `antigravity-local.prepare-offload`, then use DevTools only to select the project/chat/model.
 3. If it returns `codex-direct`, do not open or drive Antigravity.
 4. Ask Antigravity to write progress to a small artifact such as `notes/antigravity-status.md`, `plans/antigravity-next.md`, or `reports/antigravity-result.json`.
-5. Codex reads only that artifact, a targeted diff, or a compact visible UI status, then summarizes for the user.
+5. Codex reads only that artifact, a targeted diff, or a compact visible UI status.
+6. If the result is incomplete, Codex sends a short follow-up task back to Antigravity with the exact gap instead of pulling broad context into Codex.
+7. Codex summarizes for the user after Antigravity has produced a useful result or is clearly blocked.
 
 If a Codex session cannot see MCP tools and can only run shell commands, use the equivalent PowerShell helper:
 
