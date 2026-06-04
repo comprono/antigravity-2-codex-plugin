@@ -1,6 +1,6 @@
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("status", "open", "repair-live", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy", "devtools-health", "submission-guide", "offload-advice", "handoff-template", "prepare-offload", "switch-model", "submit-offload")]
+  [ValidateSet("status", "open", "repair-live", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy", "devtools-health", "submission-guide", "offload-advice", "handoff-template", "prepare-offload", "create-job", "submit-job", "list-jobs", "read-job", "cancel-job", "retry-job", "switch-model", "submit-offload")]
   [string] $Command = "status",
 
   [string] $Goal = "",
@@ -10,7 +10,11 @@ param(
   [string] $ExpectedProject = "",
   [string] $ExpectedChat = "",
   [string] $ModelPreference = "auto",
-  [object] $Submit = $false,
+  [string] $Mode = "fast",
+  [string] $JobId = "latest",
+  [string] $Reason = "Cancelled by Codex.",
+  [int] $Limit = 10,
+  [object] $Submit = $null,
   [object] $FillOnly = $false,
   [object] $SkipModelSwitch = $false,
   [object] $HasWorkspaceWork = $true,
@@ -933,6 +937,43 @@ function Invoke-SwitchModel {
   }
 }
 
+function Invoke-BridgeJobCommand {
+  param(
+    [string] $CliCommand
+  )
+
+  $localMcpScript = Join-Path $PSScriptRoot "antigravity-local-mcp.js"
+  if (-not (Test-Path -LiteralPath $localMcpScript)) {
+    throw "antigravity-local-mcp.js was not found at $localMcpScript"
+  }
+
+  $submitValue = ConvertTo-BooleanValue -Value $Submit -Default $true
+  $payload = [PSCustomObject]@{
+    goal = $Goal
+    workspace = $Workspace
+    mode = $Mode
+    nextStep = $NextStep
+    expectedProject = $ExpectedProject
+    expectedChat = $ExpectedChat
+    modelPreference = $ModelPreference
+    submit = $submitValue
+    jobId = $JobId
+    reason = $Reason
+    limit = $Limit
+  } | ConvertTo-Json -Compress
+
+  $payloadFile = Join-Path ([System.IO.Path]::GetTempPath()) ("antigravity-bridge-job-{0}.json" -f ([guid]::NewGuid().ToString("N")))
+  try {
+    [System.IO.File]::WriteAllText($payloadFile, $payload, [System.Text.UTF8Encoding]::new($false))
+    & node $localMcpScript $CliCommand --json-file $payloadFile
+    if ($LASTEXITCODE -ne 0) {
+      throw "$CliCommand failed with exit code $LASTEXITCODE"
+    }
+  } finally {
+    Remove-Item -LiteralPath $payloadFile -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Write-Status {
   $processes = @(Get-AntigravityProcess)
   $devToolsPort = Get-DevToolsPort
@@ -1034,6 +1075,30 @@ switch ($Command) {
 
   "prepare-offload" {
     Get-PrepareOffloadText
+  }
+
+  "create-job" {
+    Invoke-BridgeJobCommand -CliCommand "create-job-cli"
+  }
+
+  "submit-job" {
+    Invoke-BridgeJobCommand -CliCommand "submit-job-cli"
+  }
+
+  "list-jobs" {
+    Invoke-BridgeJobCommand -CliCommand "list-jobs-cli"
+  }
+
+  "read-job" {
+    Invoke-BridgeJobCommand -CliCommand "read-job-cli"
+  }
+
+  "cancel-job" {
+    Invoke-BridgeJobCommand -CliCommand "cancel-job-cli"
+  }
+
+  "retry-job" {
+    Invoke-BridgeJobCommand -CliCommand "retry-job-cli"
   }
 
   "switch-model" {

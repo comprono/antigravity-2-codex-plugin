@@ -20,12 +20,14 @@ Core jobs:
 - Start a new project and then start a chat there.
 - Report quota, model, UI, or submission errors without repeatedly retrying.
 - Switch the active chat to an available model automatically when the selected model is exhausted or unsuitable for cost-saving handoff.
+- Create durable bridge jobs and read compact artifacts instead of inspecting full Antigravity chats.
 
 Primary operating model:
 
 - Codex delegates nontrivial work to Antigravity first.
 - Codex waits instead of doing the same exploration itself.
 - Codex reads only compact status artifacts, targeted diffs, or concise visible status.
+- For coding/workspace tasks, Codex should prefer durable bridge jobs under `.antigravity-bridge/jobs/<jobId>/` and later read only `result.md`, `changed-files.txt`, `diff.patch`, `test-output-summary.md`, and `status.json`.
 - Codex reviews Antigravity's result, identifies gaps, and gives Antigravity the next compact improvement task.
 - Codex performs final user-facing synthesis, safety checks, and narrow code patches only when that is cheaper or higher quality than another Antigravity pass.
 - Codex should not duplicate Antigravity's file reading, broad search, browser operation, or long reasoning unless Antigravity is blocked, unavailable, or the task is tiny.
@@ -34,10 +36,10 @@ Primary operating model:
 
 This plugin exposes two MCP servers:
 
-- `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `submission-guide`, `prepare-offload`, `switch-model`, `submit-offload`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
+- `antigravity-local`: direct tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `submission-guide`, `prepare-offload`, `create-job`, `submit-job`, `list-jobs`, `read-job`, `cancel-job`, `retry-job`, `switch-model`, `submit-offload`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
-Prefer `antigravity-local.submit-offload` when the correct Antigravity project/chat is already selected and the user wants Codex to hand work to Antigravity with minimum friction. It prepares the compact handoff, first verifies/switches the selected model with `modelPreference=auto` unless `skipModelSwitch=true`, fills the active composer, and submits with a direct CDP Enter keypress without repeated `list_pages`, snapshots, fill, key, and evaluate calls. If Sonnet/Opus/GPT-OSS is exhausted, do not wait for the user to say so: call `antigravity-local.switch-model` with `modelPreference=flash-medium` or pass `modelPreference=flash-medium` to `submit-offload`. If the MCP tool list is stale and does not show `switch-model` or `submit-offload`, use the PowerShell helper `antigravity.ps1 switch-model` / `antigravity.ps1 submit-offload` before falling back to DevTools choreography. Use `antigravity-local.prepare-offload` when Codex should first show the plan or when the selected chat is uncertain. For any nontrivial workspace, repo, browser, UI, research, planning, debugging, review, implementation, or job-application task, default to Antigravity for exploration and long reasoning, while Codex stays the planner, safety gate, patch reviewer, and final summarizer. Use `antigravity-local.quick` for general setup checks. If `ReadyForLiveUiInspection` is false or `PageCount` is zero, call `antigravity-local.repair-live` once before using DevTools. If `repair-live` restarts Antigravity, do not keep using an already-started stale DevTools MCP connection; let it reconnect to the new port before UI calls. If `antigravity-devtools` fails with `Transport closed`, do not repeatedly call `list_pages` in that session. Call `antigravity-local.devtools-health`; if it reports pages are ready, restart Codex to recreate the DevTools MCP transport or use `handoff-template` for a manual paste this turn. Use `limits-summary` for normal quota checks and full `limits` only when complete per-model JSON is needed. Use `antigravity-devtools` for project/chat selection only when the selected chat is not already correct. If this skill file cannot be read in a Codex session, run the PowerShell helper fast path.
+Prefer `antigravity-local.submit-job` for nontrivial coding/workspace work. It creates a durable `.antigravity-bridge/jobs/<jobId>/` folder, asks Antigravity to write compact artifacts, verifies/switches the selected model, submits once, and lets Codex stop watching the UI. Use `antigravity-local.read-job` later to read only the artifact files. Use `antigravity-local.submit-offload` only for lightweight selected-chat handoffs that do not need a durable job folder. If Sonnet/Opus/GPT-OSS is exhausted, do not wait for the user to say so: call `antigravity-local.switch-model` with `modelPreference=flash-medium` or pass `modelPreference=flash-medium` to `submit-job` / `submit-offload`. If the MCP tool list is stale and does not show the job/model tools, use the PowerShell helper equivalents before falling back to DevTools choreography. Use `antigravity-local.prepare-offload` when Codex should first show the plan or when the selected chat is uncertain. For any nontrivial workspace, repo, browser, UI, research, planning, debugging, review, implementation, or job-application task, default to Antigravity for exploration and long reasoning, while Codex stays the planner, safety gate, patch reviewer, and final summarizer. Use `antigravity-local.quick` for general setup checks. If `ReadyForLiveUiInspection` is false or `PageCount` is zero, call `antigravity-local.repair-live` once before using DevTools. If `repair-live` restarts Antigravity, do not keep using an already-started stale DevTools MCP connection; let it reconnect to the new port before UI calls. If `antigravity-devtools` fails with `Transport closed`, do not repeatedly call `list_pages` in that session. Call `antigravity-local.devtools-health`; if it reports pages are ready, restart Codex to recreate the DevTools MCP transport or use `handoff-template` for a manual paste this turn. Use `limits-summary` for normal quota checks and full `limits` only when complete per-model JSON is needed. Use `antigravity-devtools` for project/chat selection only when the selected chat is not already correct. If this skill file cannot be read in a Codex session, run the PowerShell helper fast path.
 
 ## Requirements
 
@@ -108,6 +110,26 @@ Prepare the whole token-saving handoff in one call:
 ```text
 Call antigravity-local.prepare-offload with goal, workspace, statusFile, nextStep, hasWorkspaceWork, and estimatedCodexInputTokens.
 ```
+
+Create and submit a durable bridge job:
+
+```text
+Call antigravity-local.submit-job with goal, workspace, mode, nextStep, expectedProject, expectedChat, modelPreference=auto, and submit=true.
+```
+
+Read job results without reading the Antigravity chat:
+
+```text
+Call antigravity-local.list-jobs with workspace.
+Call antigravity-local.read-job with workspace and jobId=latest.
+```
+
+Use modes:
+
+- `fast`: inspect only directly relevant files, make the smallest safe change, run targeted verification.
+- `deep`: inspect related modules and prior patterns, run the strongest practical tests, include risks.
+- `review`: inspect and report only; do not edit.
+- `patch`: make a narrow safe edit, run relevant verification, produce a diff.
 
 Switch the selected Antigravity chat to a cost-saving available model:
 
@@ -314,13 +336,13 @@ Do not copy large files, long logs, full source, or full Antigravity chat transc
 
 Fast preferred flow:
 
-1. If the correct project/chat is already selected, call `antigravity-local.submit-offload` with `submit=true`, `modelPreference=auto`, and expected visible project/chat text.
+1. If the correct project/chat is already selected and the task is nontrivial workspace work, call `antigravity-local.submit-job` with `submit=true`, `modelPreference=auto`, and expected visible project/chat text.
 2. If a quota warning is visible or the user mentions Sonnet/Opus/GPT-OSS exhaustion, call `antigravity-local.switch-model` with `modelPreference=flash-medium` first.
-3. If MCP `switch-model` or `submit-offload` is not visible, run `antigravity.ps1 switch-model` / `antigravity.ps1 submit-offload` with the same fields.
+3. If MCP job/model tools are not visible, run `antigravity.ps1 submit-job` / `antigravity.ps1 switch-model` with the same fields.
 4. If the selected chat is uncertain, call `antigravity-local.prepare-offload`, then use DevTools only to select the project/chat; use `switch-model` for the model.
 5. If the decision is `codex-direct`, do not open or drive Antigravity.
-6. After a successful `submit-offload`, stop watching every step. Read only the requested status artifact, targeted diff, or compact visible status.
-7. If the artifact is weak, issue another compact Antigravity follow-up with the exact missing point. Do not pull broad context back into Codex unless needed for final verification.
+6. After a successful `submit-job`, stop watching every step. Read only the job artifacts with `read-job`.
+7. If the artifact is weak, issue another compact Antigravity follow-up or `retry-job` with the exact missing point. Do not pull broad context back into Codex unless needed for final verification.
 
 Detailed fallback flow:
 

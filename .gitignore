@@ -16,3 +16,4 @@ __pycache__/
 
 # Local Antigravity runtime/status artifacts
 notes/
+.antigravity-bridge/

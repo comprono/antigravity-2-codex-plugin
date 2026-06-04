@@ -78,6 +78,97 @@ const tools = [
     },
   },
   {
+    name: "create-job",
+    description: "Create a durable Antigravity bridge job folder with request/status/result/diff artifact files. Does not touch the UI.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "Task goal for Antigravity." },
+        workspace: { type: "string", description: "Local workspace path where .antigravity-bridge/jobs will be created." },
+        mode: { type: "string", description: "fast, deep, review, or patch.", default: "fast" },
+        nextStep: { type: "string", description: "Specific next action.", default: "Inspect the relevant files and write compact artifacts." },
+      },
+      required: ["goal", "workspace"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "submit-job",
+    description: "Create a durable job folder, then submit the standardized artifact handoff into the selected Antigravity chat.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "Task goal for Antigravity." },
+        workspace: { type: "string", description: "Local workspace path where .antigravity-bridge/jobs will be created." },
+        mode: { type: "string", description: "fast, deep, review, or patch.", default: "fast" },
+        nextStep: { type: "string", description: "Specific next action.", default: "Inspect the relevant files and write compact artifacts." },
+        expectedProject: { type: "string", description: "Optional visible project text that must be present before submit." },
+        expectedChat: { type: "string", description: "Optional visible chat/conversation text that must be present before submit." },
+        modelPreference: { type: "string", description: "auto, flash-medium, flash, best-available, or exact visible model name.", default: "auto" },
+        submit: { type: "boolean", description: "Set true to fill and submit the job handoff.", default: true },
+      },
+      required: ["goal", "workspace"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "list-jobs",
+    description: "List durable Antigravity bridge jobs from a workspace without reading chats or logs.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspace: { type: "string", description: "Local workspace path containing .antigravity-bridge/jobs." },
+        limit: { type: "number", description: "Maximum jobs to return.", default: 10 },
+      },
+      required: ["workspace"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "read-job",
+    description: "Read only compact result artifacts for one Antigravity bridge job.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspace: { type: "string", description: "Local workspace path containing .antigravity-bridge/jobs." },
+        jobId: { type: "string", description: "Job id. Use latest to read the newest job.", default: "latest" },
+      },
+      required: ["workspace"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "cancel-job",
+    description: "Mark a durable Antigravity bridge job cancelled. This does not stop a running Antigravity UI task.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspace: { type: "string", description: "Local workspace path containing .antigravity-bridge/jobs." },
+        jobId: { type: "string", description: "Job id. Use latest to cancel the newest job.", default: "latest" },
+        reason: { type: "string", description: "Short cancellation reason.", default: "Cancelled by Codex." },
+      },
+      required: ["workspace"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "retry-job",
+    description: "Resubmit an existing durable job request to the selected Antigravity chat.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        workspace: { type: "string", description: "Local workspace path containing .antigravity-bridge/jobs." },
+        jobId: { type: "string", description: "Job id. Use latest to retry the newest job.", default: "latest" },
+        expectedProject: { type: "string", description: "Optional visible project text that must be present before submit." },
+        expectedChat: { type: "string", description: "Optional visible chat/conversation text that must be present before submit." },
+        modelPreference: { type: "string", description: "auto, flash-medium, flash, best-available, or exact visible model name.", default: "auto" },
+        submit: { type: "boolean", description: "Set true to fill and submit the job handoff.", default: true },
+      },
+      required: ["workspace"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "submit-offload",
     description: "Fast path: prepare and submit a compact handoff into the currently selected Antigravity chat via direct CDP, avoiding repeated snapshots.",
     inputSchema: {
@@ -392,6 +483,253 @@ function jsString(value) {
   return JSON.stringify(String(value ?? ""));
 }
 
+function safeWorkspacePath(workspace) {
+  const resolved = path.resolve(String(workspace || "").trim());
+  if (!resolved || resolved === path.parse(resolved).root) {
+    throw new Error("A concrete workspace path is required for Antigravity bridge jobs.");
+  }
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+    throw new Error(`Workspace does not exist or is not a directory: ${resolved}`);
+  }
+  return resolved;
+}
+
+function jobsRootFor(workspace) {
+  return path.join(safeWorkspacePath(workspace), ".antigravity-bridge", "jobs");
+}
+
+function utcStamp() {
+  return new Date().toISOString();
+}
+
+function datePrefix(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+function nextJobId(workspace) {
+  const root = jobsRootFor(workspace);
+  fs.mkdirSync(root, { recursive: true });
+  const prefix = datePrefix();
+  const existing = fs.readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith(`${prefix}-`))
+    .map((entry) => Number.parseInt(entry.name.slice(prefix.length + 1), 10))
+    .filter(Number.isFinite);
+  const next = existing.length ? Math.max(...existing) + 1 : 1;
+  return `${prefix}-${String(next).padStart(3, "0")}`;
+}
+
+function jobDirFor(workspace, jobId) {
+  return path.join(jobsRootFor(workspace), jobId);
+}
+
+function readJsonFile(filePath, fallback = null) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJsonFile(filePath, value) {
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function modeGuidance(mode) {
+  const normalized = String(mode || "fast").trim().toLowerCase();
+  if (normalized === "deep") {
+    return "Deep mode: inspect related modules and prior patterns, run the strongest practical tests, and include risk notes.";
+  }
+  if (normalized === "review") {
+    return "Review mode: inspect and report only; do not edit files.";
+  }
+  if (normalized === "patch") {
+    return "Patch mode: make a narrow safe edit, run relevant verification, and produce a diff.";
+  }
+  return "Fast mode: inspect only directly relevant files, make the smallest safe change, and run targeted verification only.";
+}
+
+function artifactContract(jobId, jobDir) {
+  return [
+    `JobId: ${jobId}`,
+    `JobFolder: ${jobDir}`,
+    "Required artifacts:",
+    "- status.json: state, currentStep, startedAt, updatedAt, blocker if any.",
+    "- result.md: max 10 bullets with outcome, risk, and next step.",
+    "- changed-files.txt: one changed path per line, or NONE.",
+    "- diff.patch: compact patch/diff if files changed, or empty.",
+    "- test-output-summary.md: commands run and pass/fail summary only.",
+    "",
+    "Do not paste full files, full logs, screenshots, or full chat transcripts.",
+  ].join("\n");
+}
+
+function buildJobRequest(args, jobId, jobDir) {
+  const goal = String(args.goal || "").trim();
+  const workspace = safeWorkspacePath(args.workspace);
+  const mode = String(args.mode || "fast").trim().toLowerCase();
+  const nextStep = String(args.nextStep || "Inspect the relevant files and write compact artifacts.").trim();
+  return [
+    `# Antigravity Bridge Job ${jobId}`,
+    "",
+    `Goal: ${goal}`,
+    `Workspace: ${workspace}`,
+    `Mode: ${mode}`,
+    "",
+    modeGuidance(mode),
+    "",
+    `Next step: ${nextStep}`,
+    "",
+    artifactContract(jobId, jobDir),
+    "",
+    "Codex will read only result.md, changed-files.txt, diff.patch, test-output-summary.md, and status.json.",
+  ].join("\n");
+}
+
+function createJob(args = {}) {
+  const workspace = safeWorkspacePath(args.workspace);
+  const jobId = nextJobId(workspace);
+  const jobDir = jobDirFor(workspace, jobId);
+  fs.mkdirSync(jobDir, { recursive: true });
+  const createdAt = utcStamp();
+  const request = buildJobRequest({ ...args, workspace }, jobId, jobDir);
+  const status = {
+    jobId,
+    state: "queued",
+    mode: String(args.mode || "fast").trim().toLowerCase(),
+    createdAt,
+    updatedAt: createdAt,
+    currentStep: "created",
+    requestFile: "request.md",
+    resultFile: "result.md",
+    changedFilesFile: "changed-files.txt",
+    diffFile: "diff.patch",
+    testOutputSummaryFile: "test-output-summary.md",
+  };
+  fs.writeFileSync(path.join(jobDir, "request.md"), `${request}\n`, "utf8");
+  writeJsonFile(path.join(jobDir, "status.json"), status);
+  for (const file of ["result.md", "changed-files.txt", "diff.patch", "test-output-summary.md"]) {
+    const target = path.join(jobDir, file);
+    if (!fs.existsSync(target)) fs.writeFileSync(target, "", "utf8");
+  }
+  return { workspace, jobId, jobDir, status, request };
+}
+
+function resolveJobId(workspace, jobId = "latest") {
+  const root = jobsRootFor(workspace);
+  if (!fs.existsSync(root)) {
+    throw new Error(`No Antigravity bridge jobs found in ${root}`);
+  }
+  if (jobId && jobId !== "latest") {
+    const dir = jobDirFor(workspace, jobId);
+    if (!fs.existsSync(dir)) throw new Error(`Job not found: ${jobId}`);
+    return jobId;
+  }
+  const jobs = fs.readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  if (!jobs.length) throw new Error(`No Antigravity bridge jobs found in ${root}`);
+  return jobs[jobs.length - 1];
+}
+
+function summarizeFile(filePath, maxChars = 12000) {
+  if (!fs.existsSync(filePath)) return "";
+  const text = fs.readFileSync(filePath, "utf8");
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n\n[truncated ${text.length - maxChars} chars]`;
+}
+
+function listJobs(args = {}) {
+  const workspace = safeWorkspacePath(args.workspace);
+  const root = jobsRootFor(workspace);
+  const limit = Math.max(1, Math.min(100, Number(args.limit || 10)));
+  if (!fs.existsSync(root)) {
+    return `JobsRoot: ${root}\nCount: 0`;
+  }
+  const rows = fs.readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const status = readJsonFile(path.join(root, entry.name, "status.json"), {});
+      return {
+        jobId: entry.name,
+        state: status.state || "unknown",
+        mode: status.mode || "",
+        updatedAt: status.updatedAt || "",
+        currentStep: status.currentStep || "",
+      };
+    })
+    .sort((a, b) => String(b.jobId).localeCompare(String(a.jobId)))
+    .slice(0, limit);
+  return [
+    `JobsRoot: ${root}`,
+    `Count: ${rows.length}`,
+    ...rows.map((row) => `${row.jobId} | ${row.state} | ${row.mode} | ${row.updatedAt} | ${row.currentStep}`),
+  ].join("\n");
+}
+
+function readJob(args = {}) {
+  const workspace = safeWorkspacePath(args.workspace);
+  const jobId = resolveJobId(workspace, args.jobId || "latest");
+  const jobDir = jobDirFor(workspace, jobId);
+  const status = summarizeFile(path.join(jobDir, "status.json"), 4000);
+  const result = summarizeFile(path.join(jobDir, "result.md"), 8000);
+  const changed = summarizeFile(path.join(jobDir, "changed-files.txt"), 4000);
+  const tests = summarizeFile(path.join(jobDir, "test-output-summary.md"), 6000);
+  const diff = summarizeFile(path.join(jobDir, "diff.patch"), 12000);
+  return [
+    `JobId: ${jobId}`,
+    `JobFolder: ${jobDir}`,
+    "",
+    "status.json:",
+    status || "{}",
+    "",
+    "result.md:",
+    result || "<empty>",
+    "",
+    "changed-files.txt:",
+    changed || "<empty>",
+    "",
+    "test-output-summary.md:",
+    tests || "<empty>",
+    "",
+    "diff.patch:",
+    diff || "<empty>",
+  ].join("\n");
+}
+
+function cancelJob(args = {}) {
+  const workspace = safeWorkspacePath(args.workspace);
+  const jobId = resolveJobId(workspace, args.jobId || "latest");
+  const jobDir = jobDirFor(workspace, jobId);
+  const statusPath = path.join(jobDir, "status.json");
+  const status = readJsonFile(statusPath, { jobId });
+  status.state = "cancelled";
+  status.updatedAt = utcStamp();
+  status.currentStep = "cancelled";
+  status.blocker = String(args.reason || "Cancelled by Codex.").trim();
+  writeJsonFile(statusPath, status);
+  return `CancelJobResult:\nJobId: ${jobId}\nState: cancelled\nNote: This marks the bridge job only; stop a live Antigravity UI run separately if needed.`;
+}
+
+function markJobSubmitted(workspace, jobId) {
+  const statusPath = path.join(jobDirFor(workspace, jobId), "status.json");
+  const status = readJsonFile(statusPath, { jobId });
+  status.state = "submitted";
+  status.updatedAt = utcStamp();
+  status.currentStep = "submitted-to-antigravity";
+  writeJsonFile(statusPath, status);
+}
+
+function buildJobHandoff(workspace, jobId) {
+  const jobDir = jobDirFor(workspace, jobId);
+  const request = summarizeFile(path.join(jobDir, "request.md"), 16000);
+  return [
+    "Execute this Antigravity bridge job. Work locally and write artifacts; do not paste full logs/source.",
+    "",
+    request,
+  ].join("\n");
+}
+
 function availableModelNames(limitsSummary) {
   return (limitsSummary?.RecommendedAvailable || [])
     .map((entry) => String(entry.DisplayName || entry.Id || "").trim())
@@ -541,7 +879,9 @@ async function submitOffloadToCurrentChat(args = {}) {
     return `SubmitOffload: skipped\nDecision: ${decision}\nReason: task does not need Antigravity.`;
   }
 
-  const handoff = buildHandoffTemplate(args).replace(/^Use this as a compact Antigravity offload handoff:\n\n/, "");
+  const handoff = args.handoffText
+    ? String(args.handoffText)
+    : buildHandoffTemplate(args).replace(/^Use this as a compact Antigravity offload handoff:\n\n/, "");
   const expectedProject = String(args.expectedProject || "").trim();
   const expectedChat = String(args.expectedChat || "").trim();
   const submit = Boolean(args.submit);
@@ -705,6 +1045,66 @@ async function submitOffloadToCurrentChat(args = {}) {
   }
 }
 
+async function submitJob(args = {}) {
+  const created = createJob(args);
+  const handoffText = buildJobHandoff(created.workspace, created.jobId);
+  const submit = args.submit !== false;
+  const text = await submitOffloadToCurrentChat({
+    goal: `Execute Antigravity bridge job ${created.jobId}`,
+    workspace: created.workspace,
+    statusFile: path.join(created.jobDir, "status.json"),
+    nextStep: `Read request.md in ${created.jobDir} and write the required bridge artifacts.`,
+    expectedProject: args.expectedProject || "",
+    expectedChat: args.expectedChat || "",
+    modelPreference: args.modelPreference || "auto",
+    submit,
+    handoffText,
+  });
+  if (/Submitted: true/.test(text)) {
+    markJobSubmitted(created.workspace, created.jobId);
+  }
+  return [
+    "SubmitJobResult:",
+    `JobId: ${created.jobId}`,
+    `JobFolder: ${created.jobDir}`,
+    `SubmittedRequested: ${submit}`,
+    "",
+    text,
+    "",
+    "Codex follow-up: do not read the Antigravity chat. Later call read-job for result.md, changed-files.txt, diff.patch, test-output-summary.md, and status.json.",
+  ].join("\n");
+}
+
+async function retryJob(args = {}) {
+  const workspace = safeWorkspacePath(args.workspace);
+  const jobId = resolveJobId(workspace, args.jobId || "latest");
+  const jobDir = jobDirFor(workspace, jobId);
+  const handoffText = buildJobHandoff(workspace, jobId);
+  const submit = args.submit !== false;
+  const text = await submitOffloadToCurrentChat({
+    goal: `Retry Antigravity bridge job ${jobId}`,
+    workspace,
+    statusFile: path.join(jobDir, "status.json"),
+    nextStep: `Retry request.md in ${jobDir} and overwrite the required bridge artifacts.`,
+    expectedProject: args.expectedProject || "",
+    expectedChat: args.expectedChat || "",
+    modelPreference: args.modelPreference || "auto",
+    submit,
+    handoffText,
+  });
+  if (/Submitted: true/.test(text)) {
+    markJobSubmitted(workspace, jobId);
+  }
+  return [
+    "RetryJobResult:",
+    `JobId: ${jobId}`,
+    `JobFolder: ${jobDir}`,
+    `SubmittedRequested: ${submit}`,
+    "",
+    text,
+  ].join("\n");
+}
+
 function buildDevToolsHealthAdvice(result) {
   const pageCount = Number(result?.PageCount || 0);
   const running = Boolean(result?.Running);
@@ -800,6 +1200,49 @@ async function handleRequest(message) {
         return;
       }
 
+      if (name === "create-job") {
+        const created = createJob(params?.arguments || {});
+        const text = [
+          "CreateJobResult:",
+          `JobId: ${created.jobId}`,
+          `JobFolder: ${created.jobDir}`,
+          "State: queued",
+          "Next: call submit-job to send it to Antigravity, or read request.md for manual review.",
+        ].join("\n");
+        sendResult(id, { content: [{ type: "text", text }] });
+        return;
+      }
+
+      if (name === "submit-job") {
+        const text = await submitJob(params?.arguments || {});
+        sendResult(id, { content: [{ type: "text", text }] });
+        return;
+      }
+
+      if (name === "list-jobs") {
+        const text = listJobs(params?.arguments || {});
+        sendResult(id, { content: [{ type: "text", text }] });
+        return;
+      }
+
+      if (name === "read-job") {
+        const text = readJob(params?.arguments || {});
+        sendResult(id, { content: [{ type: "text", text }] });
+        return;
+      }
+
+      if (name === "cancel-job") {
+        const text = cancelJob(params?.arguments || {});
+        sendResult(id, { content: [{ type: "text", text }] });
+        return;
+      }
+
+      if (name === "retry-job") {
+        const text = await retryJob(params?.arguments || {});
+        sendResult(id, { content: [{ type: "text", text }] });
+        return;
+      }
+
       if (name === "submit-offload") {
         const text = await submitOffloadToCurrentChat(params?.arguments || {});
         sendResult(id, { content: [{ type: "text", text }] });
@@ -833,7 +1276,7 @@ async function handleRequest(message) {
   }
 }
 
-if (process.argv[2] === "submit-offload-cli" || process.argv[2] === "switch-model-cli") {
+if (["submit-offload-cli", "switch-model-cli", "create-job-cli", "submit-job-cli", "list-jobs-cli", "read-job-cli", "cancel-job-cli", "retry-job-cli"].includes(process.argv[2])) {
   let args = {};
   try {
     if (process.argv[3] === "--json-file") {
@@ -846,7 +1289,20 @@ if (process.argv[2] === "submit-offload-cli" || process.argv[2] === "switch-mode
     process.exit(2);
   }
 
-  const action = process.argv[2] === "switch-model-cli" ? switchModelInCurrentChat : submitOffloadToCurrentChat;
+  const actions = {
+    "submit-offload-cli": submitOffloadToCurrentChat,
+    "switch-model-cli": switchModelInCurrentChat,
+    "create-job-cli": async (value) => {
+      const created = createJob(value);
+      return `CreateJobResult:\nJobId: ${created.jobId}\nJobFolder: ${created.jobDir}\nState: queued`;
+    },
+    "submit-job-cli": submitJob,
+    "list-jobs-cli": async (value) => listJobs(value),
+    "read-job-cli": async (value) => readJob(value),
+    "cancel-job-cli": async (value) => cancelJob(value),
+    "retry-job-cli": retryJob,
+  };
+  const action = actions[process.argv[2]];
   action(args)
     .then((text) => {
       console.log(text);
