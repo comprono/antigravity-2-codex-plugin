@@ -89,7 +89,8 @@ const tools = [
         nextStep: { type: "string", description: "Specific next action.", default: "Inspect the relevant files and write a compact status checkpoint." },
         expectedProject: { type: "string", description: "Optional visible project text that must be present before submit." },
         expectedChat: { type: "string", description: "Optional visible chat/conversation text that must be present before submit." },
-        submit: { type: "boolean", description: "Set true to click Send. False fills/verifies only.", default: false },
+        submit: { type: "boolean", description: "Set true to fill and click Send.", default: false },
+        fillOnly: { type: "boolean", description: "Set true to fill the composer without clicking Send. Use only when the user wants a manual review before submit.", default: false },
       },
       required: ["goal", "submit"],
       additionalProperties: false,
@@ -386,6 +387,7 @@ async function submitOffloadToCurrentChat(args = {}) {
   const expectedProject = String(args.expectedProject || "").trim();
   const expectedChat = String(args.expectedChat || "").trim();
   const submit = Boolean(args.submit);
+  const fillOnly = Boolean(args.fillOnly);
   const { port, page } = await getAntigravityPage();
   const client = await createCdpClient(page.webSocketDebuggerUrl);
 
@@ -395,12 +397,17 @@ async function submitOffloadToCurrentChat(args = {}) {
   const expectedProject = ${jsString(expectedProject)};
   const expectedChat = ${jsString(expectedChat)};
   const shouldSubmit = ${submit ? "true" : "false"};
+  const shouldFillOnly = ${fillOnly ? "true" : "false"};
   const visibleText = document.body ? document.body.innerText || "" : "";
   const missing = [];
   if (expectedProject && !visibleText.includes(expectedProject)) missing.push("expectedProject");
   if (expectedChat && !visibleText.includes(expectedChat)) missing.push("expectedChat");
   if (missing.length) {
     return { ok: false, stage: "verify", missing, submitted: false };
+  }
+
+  if (!shouldSubmit && !shouldFillOnly) {
+    return { ok: true, stage: "verified", submitted: false, promptLength: prompt.length };
   }
 
   const isVisible = (el) => {

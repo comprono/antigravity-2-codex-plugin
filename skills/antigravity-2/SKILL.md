@@ -115,6 +115,7 @@ Call antigravity-local.submit-offload with goal, workspace, statusFile, nextStep
 ```
 
 Use `expectedProject` and `expectedChat` when known. If either expected string is not visible, `submit-offload` stops before filling or submitting.
+Use `submit=false` for verify-only; it must not fill the composer. Use `fillOnly=true` only when the user wants to manually review the handoff before sending.
 
 If MCP `submit-offload` is not visible in the current Codex session, use the raw helper:
 

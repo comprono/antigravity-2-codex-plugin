@@ -10,6 +10,7 @@ param(
   [string] $ExpectedProject = "",
   [string] $ExpectedChat = "",
   [object] $Submit = $false,
+  [object] $FillOnly = $false,
   [object] $HasWorkspaceWork = $true,
   [int] $EstimatedCodexInputTokens = 2000
 )
@@ -874,6 +875,7 @@ function Get-PrepareOffloadText {
 
 function Invoke-SubmitOffload {
   $submitValue = ConvertTo-BooleanValue -Value $Submit -Default $false
+  $fillOnlyValue = ConvertTo-BooleanValue -Value $FillOnly -Default $false
   $localMcpScript = Join-Path $PSScriptRoot "antigravity-local-mcp.js"
   if (-not (Test-Path -LiteralPath $localMcpScript)) {
     throw "antigravity-local-mcp.js was not found at $localMcpScript"
@@ -887,6 +889,7 @@ function Invoke-SubmitOffload {
     expectedProject = $ExpectedProject
     expectedChat = $ExpectedChat
     submit = $submitValue
+    fillOnly = $fillOnlyValue
   } | ConvertTo-Json -Compress
 
   $payloadFile = Join-Path ([System.IO.Path]::GetTempPath()) ("antigravity-submit-offload-{0}.json" -f ([guid]::NewGuid().ToString("N")))
