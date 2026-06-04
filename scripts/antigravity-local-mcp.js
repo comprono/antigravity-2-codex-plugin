@@ -48,6 +48,11 @@ const tools = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
+    name: "devtools-health",
+    description: "Low-token fallback for antigravity-devtools transport errors. Reports live pages and the recommended recovery step.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
     name: "limits-summary",
     description: "Preferred quota check. Compact model availability summary without dumping full per-model JSON.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -202,6 +207,26 @@ function buildOffloadAdvice(args = {}) {
   ].join("\n");
 }
 
+function buildDevToolsHealthAdvice(result) {
+  const pageCount = Number(result?.PageCount || 0);
+  const running = Boolean(result?.Running);
+  const port = result?.DevToolsPort || "<unknown>";
+  const status = running && pageCount > 0 ? "ready" : "not-ready";
+  const next = status === "ready"
+    ? "If antigravity-devtools still says Transport closed, do not retry the same MCP transport. Restart Codex so the DevTools MCP server is re-created, or use handoff-template/manual paste for this turn."
+    : "Run antigravity-local.repair-live once. If it restarts Antigravity, restart Codex before calling antigravity-devtools again.";
+
+  return [
+    `DevToolsHealth: ${status}`,
+    `Running: ${running}`,
+    `DevToolsPort: ${port}`,
+    `PageCount: ${pageCount}`,
+    `Next: ${next}`,
+    "",
+    "Rule: antigravity-local can report health even when antigravity-devtools/list_pages fails with Transport closed. A closed transport means the DevTools MCP child process died; it is not fixed by repeatedly calling list_pages in the same session.",
+  ].join("\n");
+}
+
 async function handleRequest(message) {
   const { id, method, params } = message;
 
@@ -240,6 +265,13 @@ async function handleRequest(message) {
 
       if (name === "offload-advice") {
         const text = buildOffloadAdvice(params?.arguments || {});
+        sendResult(id, { content: [{ type: "text", text }] });
+        return;
+      }
+
+      if (name === "devtools-health") {
+        const result = await runHelper("live");
+        const text = `${buildDevToolsHealthAdvice(result)}\n\nRaw live report:\n${JSON.stringify(result, null, 2)}`;
         sendResult(id, { content: [{ type: "text", text }] });
         return;
       }

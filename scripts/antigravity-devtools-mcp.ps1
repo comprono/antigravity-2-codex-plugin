@@ -6,6 +6,7 @@ $userDataPath = Join-Path $env:APPDATA "Antigravity"
 $devToolsPortFile = Join-Path $userDataPath "DevToolsActivePort"
 $helperScript = Join-Path (Split-Path -Parent $PSScriptRoot) "scripts\antigravity.ps1"
 $mcpBin = Join-Path $installRoot "resources\app.asar.unpacked\node_modules\chrome-devtools-mcp\build\src\bin\chrome-devtools-mcp.js"
+$logFile = Join-Path $env:TEMP "antigravity-devtools-mcp.log"
 
 if (-not (Test-Path -LiteralPath $exePath)) {
   throw "Antigravity.exe was not found at $exePath"
@@ -39,6 +40,7 @@ function Get-LivePageCount {
 
 if ((Get-LivePageCount) -eq 0) {
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $helperScript repair-live | Out-Null
+  Start-Sleep -Seconds 2
 }
 
 if (-not (Test-Path -LiteralPath $devToolsPortFile)) {
@@ -53,5 +55,9 @@ if ($lines.Count -eq 0 -or [string]::IsNullOrWhiteSpace([string]$lines[0])) {
 $port = [string]$lines[0]
 $browserUrl = "http://127.0.0.1:$port"
 
-& node $mcpBin --browserUrl $browserUrl --no-usage-statistics
+if ((Get-LivePageCount) -eq 0) {
+  throw "Antigravity DevTools has no inspectable pages after repair. Run antigravity-local.live or antigravity-local.repair-live, then restart Codex so the DevTools MCP transport can reconnect."
+}
+
+& node $mcpBin --browserUrl $browserUrl --no-usage-statistics --no-performance-crux --acceptInsecureCerts --logFile $logFile
 exit $LASTEXITCODE
