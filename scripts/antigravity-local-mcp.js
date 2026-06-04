@@ -2,9 +2,12 @@
 
 const { spawn } = require("node:child_process");
 const path = require("node:path");
+const fs = require("node:fs");
+const os = require("node:os");
 
 const pluginRoot = path.resolve(__dirname, "..");
 const helperScript = path.join(pluginRoot, "scripts", "antigravity.ps1");
+const devToolsPortFile = path.join(process.env.APPDATA || "", "Antigravity", "DevToolsActivePort");
 
 const tools = [
   {
@@ -71,6 +74,24 @@ const tools = [
         estimatedCodexInputTokens: { type: "number", description: "Rough Codex tokens needed if handled directly.", default: 2000 },
       },
       required: ["goal"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "submit-offload",
+    description: "Fast path: prepare and submit a compact handoff into the currently selected Antigravity chat via direct CDP, avoiding repeated snapshots.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "Task goal for Antigravity." },
+        workspace: { type: "string", description: "Local workspace path or Antigravity project name." },
+        statusFile: { type: "string", description: "Small artifact Antigravity should write.", default: "notes/antigravity-status.md" },
+        nextStep: { type: "string", description: "Specific next action.", default: "Inspect the relevant files and write a compact status checkpoint." },
+        expectedProject: { type: "string", description: "Optional visible project text that must be present before submit." },
+        expectedChat: { type: "string", description: "Optional visible chat/conversation text that must be present before submit." },
+        submit: { type: "boolean", description: "Set true to click Send. False fills/verifies only.", default: false },
+      },
+      required: ["goal", "submit"],
       additionalProperties: false,
     },
   },
@@ -271,6 +292,192 @@ function buildPrepareOffload(args = {}, quick = null) {
   ].join("\n");
 }
 
+function getDevToolsPort() {
+  if (!devToolsPortFile || !fs.existsSync(devToolsPortFile)) {
+    throw new Error(`DevToolsActivePort not found at ${devToolsPortFile}`);
+  }
+  const firstLine = fs.readFileSync(devToolsPortFile, "utf8").split(/\r?\n/)[0]?.trim();
+  if (!firstLine) {
+    throw new Error("DevToolsActivePort exists but does not contain a port.");
+  }
+  return firstLine;
+}
+
+async function getAntigravityPage() {
+  const port = getDevToolsPort();
+  const pages = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) => response.json());
+  const page = pages.find((entry) => entry.type === "page" && entry.webSocketDebuggerUrl)
+    || pages.find((entry) => entry.webSocketDebuggerUrl);
+  if (!page) {
+    throw new Error(`No inspectable Antigravity page found on DevTools port ${port}.`);
+  }
+  return { port, page };
+}
+
+function createCdpClient(webSocketDebuggerUrl) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(webSocketDebuggerUrl);
+    let nextId = 1;
+    const pending = new Map();
+    const timeout = setTimeout(() => reject(new Error("Timed out connecting to Antigravity DevTools WebSocket.")), 5000);
+
+    ws.addEventListener("open", () => {
+      clearTimeout(timeout);
+      resolve({
+        send(method, params = {}) {
+          const id = nextId++;
+          ws.send(JSON.stringify({ id, method, params }));
+          return new Promise((sendResolve, sendReject) => {
+            const timer = setTimeout(() => {
+              pending.delete(id);
+              sendReject(new Error(`CDP command timed out: ${method}`));
+            }, 10000);
+            pending.set(id, { resolve: sendResolve, reject: sendReject, timer });
+          });
+        },
+        close() {
+          try {
+            ws.close();
+          } catch {
+            // Ignore close races.
+          }
+        },
+      });
+    });
+
+    ws.addEventListener("message", (event) => {
+      let message;
+      try {
+        message = JSON.parse(String(event.data));
+      } catch {
+        return;
+      }
+      if (!message.id || !pending.has(message.id)) {
+        return;
+      }
+      const entry = pending.get(message.id);
+      pending.delete(message.id);
+      clearTimeout(entry.timer);
+      if (message.error) {
+        entry.reject(new Error(message.error.message || JSON.stringify(message.error)));
+      } else {
+        entry.resolve(message.result);
+      }
+    });
+
+    ws.addEventListener("error", () => {
+      clearTimeout(timeout);
+      reject(new Error("Failed to connect to Antigravity DevTools WebSocket."));
+    });
+  });
+}
+
+function jsString(value) {
+  return JSON.stringify(String(value ?? ""));
+}
+
+async function submitOffloadToCurrentChat(args = {}) {
+  const { decision } = getOffloadDecision({ ...args, hasWorkspaceWork: true, estimatedCodexInputTokens: 2000 });
+  if (decision !== "offload-to-antigravity") {
+    return `SubmitOffload: skipped\nDecision: ${decision}\nReason: task does not need Antigravity.`;
+  }
+
+  const handoff = buildHandoffTemplate(args).replace(/^Use this as a compact Antigravity offload handoff:\n\n/, "");
+  const expectedProject = String(args.expectedProject || "").trim();
+  const expectedChat = String(args.expectedChat || "").trim();
+  const submit = Boolean(args.submit);
+  const { port, page } = await getAntigravityPage();
+  const client = await createCdpClient(page.webSocketDebuggerUrl);
+
+  const expression = `
+(() => {
+  const prompt = ${jsString(handoff)};
+  const expectedProject = ${jsString(expectedProject)};
+  const expectedChat = ${jsString(expectedChat)};
+  const shouldSubmit = ${submit ? "true" : "false"};
+  const visibleText = document.body ? document.body.innerText || "" : "";
+  const missing = [];
+  if (expectedProject && !visibleText.includes(expectedProject)) missing.push("expectedProject");
+  if (expectedChat && !visibleText.includes(expectedChat)) missing.push("expectedChat");
+  if (missing.length) {
+    return { ok: false, stage: "verify", missing, submitted: false };
+  }
+
+  const isVisible = (el) => {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+  };
+
+  const candidates = Array.from(document.querySelectorAll('textarea,input,[contenteditable="true"],[role="textbox"],[role="combobox"]'))
+    .filter((el) => isVisible(el) && !el.disabled && !el.readOnly)
+    .sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom);
+  const composer = candidates[0];
+  if (!composer) {
+    return { ok: false, stage: "composer", submitted: false, message: "No visible composer found." };
+  }
+
+  composer.focus();
+  if (composer.matches('textarea,input')) {
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(composer), "value")?.set;
+    if (setter) setter.call(composer, prompt);
+    else composer.value = prompt;
+    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
+    composer.dispatchEvent(new Event("change", { bubbles: true }));
+  } else {
+    document.execCommand("selectAll", false, null);
+    const inserted = document.execCommand("insertText", false, prompt);
+    if (!inserted) composer.textContent = prompt;
+    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: prompt }));
+  }
+
+  if (!shouldSubmit) {
+    return { ok: true, stage: "filled", submitted: false, promptLength: prompt.length };
+  }
+
+  const composerRect = composer.getBoundingClientRect();
+  const buttons = Array.from(document.querySelectorAll('button,[role="button"]'))
+    .filter((el) => isVisible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true");
+  const labeled = buttons.find((el) => /send|submit/i.test([el.ariaLabel, el.title, el.textContent].filter(Boolean).join(" ")));
+  const nearby = buttons
+    .filter((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.top >= composerRect.top - 80 && rect.bottom <= composerRect.bottom + 120 && rect.left > composerRect.left;
+    })
+    .sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right)[0];
+  const sendButton = labeled || nearby;
+  if (!sendButton) {
+    return { ok: true, stage: "filled-no-send-button", submitted: false, promptLength: prompt.length };
+  }
+  sendButton.click();
+  return { ok: true, stage: "submitted", submitted: true, promptLength: prompt.length };
+})()
+`;
+
+  try {
+    const result = await client.send("Runtime.evaluate", {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    const value = result?.result?.value || {};
+    return [
+      "SubmitOffloadResult:",
+      `DevToolsPort: ${port}`,
+      `PageTitle: ${page.title || "<unknown>"}`,
+      `Ok: ${value.ok === true}`,
+      `Stage: ${value.stage || "<unknown>"}`,
+      `Submitted: ${value.submitted === true}`,
+      value.missing?.length ? `Missing: ${value.missing.join(", ")}` : null,
+      value.message ? `Message: ${value.message}` : null,
+      "Next: If Submitted is true, stop monitoring every UI step and read only the requested status artifact or targeted diff.",
+    ].filter(Boolean).join("\n");
+  } finally {
+    client.close();
+  }
+}
+
 function buildDevToolsHealthAdvice(result) {
   const pageCount = Number(result?.PageCount || 0);
   const running = Boolean(result?.Running);
@@ -362,6 +569,12 @@ async function handleRequest(message) {
       if (name === "prepare-offload") {
         const quick = await runHelper("quick");
         const text = buildPrepareOffload(params?.arguments || {}, quick);
+        sendResult(id, { content: [{ type: "text", text }] });
+        return;
+      }
+
+      if (name === "submit-offload") {
+        const text = await submitOffloadToCurrentChat(params?.arguments || {});
         sendResult(id, { content: [{ type: "text", text }] });
         return;
       }
