@@ -20,7 +20,7 @@ Keywords: Google Antigravity Codex plugin, OpenAI Codex Antigravity, Antigravity
 - Reports install path, user data path, running process IDs, setup readiness, and DevTools port.
 - Reports Antigravity model quota state from the local language server.
 - Connects to Antigravity's bundled `chrome-devtools-mcp` server when available.
-- Exposes local setup/model/status commands as MCP tools, so Codex can use them even when skill files are unavailable.
+- Exposes local setup/model/status and active-model switch commands as MCP tools, so Codex can use them even when skill files are unavailable.
 - Helps Codex inspect live project/chat context from the UI.
 - Supports safe handoff to continue an existing chat, start a new chat in an existing project, or start a new project.
 - Provides a local privacy scan for sensitive data before publishing changes.
@@ -54,10 +54,10 @@ The setup report tells Codex whether Antigravity is installed, whether Node.js i
 
 The plugin registers two MCP servers:
 
-- `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `submission-guide`, `prepare-offload`, `submit-offload`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
+- `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `submission-guide`, `prepare-offload`, `switch-model`, `submit-offload`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
-Codex should call `antigravity-local.submit-offload` first when the correct Antigravity project/chat is already selected and the goal is to hand work to Antigravity with minimum friction. It prepares the compact handoff, fills the active composer, and submits with a direct CDP Enter keypress, avoiding repeated `list_pages`, snapshots, fill, key, and evaluate calls. If the MCP tool list is stale and does not show `submit-offload`, use the PowerShell helper `antigravity.ps1 submit-offload` before falling back to DevTools choreography. Use `antigravity-local.prepare-offload` when Codex should show the plan first or when the selected chat is uncertain. For nontrivial workspace, repo, browser, UI, research, planning, debugging, review, implementation, and job-application work, the intended cost split is: Antigravity explores and works locally; Codex plans, gates safety, reviews final changes, and summarizes. Use `antigravity-local.quick` for general setup checks. If `ReadyForLiveUiInspection` is false, call `antigravity-local.repair-live` once before using DevTools. If repair restarts Antigravity, an already-started DevTools MCP connection may need to reconnect to the new port. If `antigravity-devtools` fails with `Transport closed`, call `antigravity-local.devtools-health`; do not keep retrying `list_pages` in the same broken transport. Use `limits-summary` for normal quota checks and full `limits` only when the complete per-model JSON is needed.
+Codex should call `antigravity-local.submit-offload` first when the correct Antigravity project/chat is already selected and the goal is to hand work to Antigravity with minimum friction. It prepares the compact handoff, verifies or switches the active model with `modelPreference=auto` unless explicitly skipped, fills the active composer, and submits with a direct CDP Enter keypress, avoiding repeated `list_pages`, snapshots, fill, key, and evaluate calls. If Sonnet/Opus/GPT-OSS is exhausted or the user asks for Flash, Codex should call `antigravity-local.switch-model` with `modelPreference=flash-medium` before submitting. If the MCP tool list is stale and does not show `switch-model` or `submit-offload`, use the PowerShell helper `antigravity.ps1 switch-model` / `antigravity.ps1 submit-offload` before falling back to DevTools choreography. Use `antigravity-local.prepare-offload` when Codex should show the plan first or when the selected chat is uncertain. For nontrivial workspace, repo, browser, UI, research, planning, debugging, review, implementation, and job-application work, the intended cost split is: Antigravity explores and works locally; Codex plans, gates safety, reviews final changes, and summarizes. Use `antigravity-local.quick` for general setup checks. If `ReadyForLiveUiInspection` is false, call `antigravity-local.repair-live` once before using DevTools. If repair restarts Antigravity, an already-started DevTools MCP connection may need to reconnect to the new port. If `antigravity-devtools` fails with `Transport closed`, call `antigravity-local.devtools-health`; do not keep retrying `list_pages` in the same broken transport. Use `limits-summary` for normal quota checks and full `limits` only when the complete per-model JSON is needed.
 
 ## Usage
 
@@ -114,6 +114,14 @@ powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2
 
 The `limits-summary` command gives a compact availability summary. The `models` and `limits` commands call Antigravity's local language server over its gRPC-web API (`LanguageServerService/GetAvailableModels` and `GetLoadCodeAssist`) and return the fuller per-model data. This is the same source the Antigravity Models tab uses. It returns per-model quota metadata such as remaining fraction and reset time when available. It does not expose a raw all-model token ledger if Antigravity itself does not publish one.
 
+Switch the current Antigravity chat to a cost-saving available model:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2\scripts\antigravity.ps1" switch-model -ModelPreference flash-medium -ExpectedProject "<visible project>" -ExpectedChat "<visible chat>"
+```
+
+`switch-model` uses the local model-limit summary to choose an available model, then uses the local CDP bridge to select it in the visible Antigravity chat. `flash-medium` prefers `Gemini 3.5 Flash (Medium)` when available, then falls back to another available Flash/Gemini model.
+
 Run a local repository privacy scan:
 
 ```powershell
@@ -163,7 +171,7 @@ powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2
 For selected-chat direct submission through the PowerShell helper:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2\scripts\antigravity.ps1" submit-offload -Goal "<goal>" -Workspace "<path>" -StatusFile "notes/antigravity-status.md" -NextStep "<next step>" -ExpectedProject "<project text>" -ExpectedChat "<chat text>" -Submit true
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2\scripts\antigravity.ps1" submit-offload -Goal "<goal>" -Workspace "<path>" -StatusFile "notes/antigravity-status.md" -NextStep "<next step>" -ExpectedProject "<project text>" -ExpectedChat "<chat text>" -ModelPreference auto -Submit true
 ```
 
 Use `-Submit false` for verify-only; it should not fill the composer. Use `-FillOnly true` only when the user wants to manually review the handoff before sending.

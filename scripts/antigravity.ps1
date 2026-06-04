@@ -1,6 +1,6 @@
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("status", "open", "repair-live", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy", "devtools-health", "submission-guide", "offload-advice", "handoff-template", "prepare-offload", "submit-offload")]
+  [ValidateSet("status", "open", "repair-live", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy", "devtools-health", "submission-guide", "offload-advice", "handoff-template", "prepare-offload", "switch-model", "submit-offload")]
   [string] $Command = "status",
 
   [string] $Goal = "",
@@ -9,8 +9,10 @@ param(
   [string] $NextStep = "Inspect the relevant files and write a compact status checkpoint.",
   [string] $ExpectedProject = "",
   [string] $ExpectedChat = "",
+  [string] $ModelPreference = "auto",
   [object] $Submit = $false,
   [object] $FillOnly = $false,
+  [object] $SkipModelSwitch = $false,
   [object] $HasWorkspaceWork = $true,
   [int] $EstimatedCodexInputTokens = 2000
 )
@@ -842,7 +844,7 @@ function Get-PrepareOffloadText {
   }
 
   $nextAction = if ($decision.ShouldOffload) {
-    "Use antigravity-devtools only to select the project/chat/model, fill the handoff, and click the Send/arrow button. Then stop monitoring and read only the status artifact or targeted diff."
+    "First run switch-model with ModelPreference auto or flash-medium, then run submit-offload with Submit true. Avoid raw DevTools choreography unless the direct tools fail."
   } else {
     "Do not open or drive Antigravity for this task. Answer or act directly in Codex."
   }
@@ -876,6 +878,7 @@ function Get-PrepareOffloadText {
 function Invoke-SubmitOffload {
   $submitValue = ConvertTo-BooleanValue -Value $Submit -Default $false
   $fillOnlyValue = ConvertTo-BooleanValue -Value $FillOnly -Default $false
+  $skipModelSwitchValue = ConvertTo-BooleanValue -Value $SkipModelSwitch -Default $false
   $localMcpScript = Join-Path $PSScriptRoot "antigravity-local-mcp.js"
   if (-not (Test-Path -LiteralPath $localMcpScript)) {
     throw "antigravity-local-mcp.js was not found at $localMcpScript"
@@ -888,8 +891,10 @@ function Invoke-SubmitOffload {
     nextStep = $NextStep
     expectedProject = $ExpectedProject
     expectedChat = $ExpectedChat
+    modelPreference = $ModelPreference
     submit = $submitValue
     fillOnly = $fillOnlyValue
+    skipModelSwitch = $skipModelSwitchValue
   } | ConvertTo-Json -Compress
 
   $payloadFile = Join-Path ([System.IO.Path]::GetTempPath()) ("antigravity-submit-offload-{0}.json" -f ([guid]::NewGuid().ToString("N")))
@@ -898,6 +903,30 @@ function Invoke-SubmitOffload {
     & node $localMcpScript submit-offload-cli --json-file $payloadFile
     if ($LASTEXITCODE -ne 0) {
       throw "submit-offload failed with exit code $LASTEXITCODE"
+    }
+  } finally {
+    Remove-Item -LiteralPath $payloadFile -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Invoke-SwitchModel {
+  $localMcpScript = Join-Path $PSScriptRoot "antigravity-local-mcp.js"
+  if (-not (Test-Path -LiteralPath $localMcpScript)) {
+    throw "antigravity-local-mcp.js was not found at $localMcpScript"
+  }
+
+  $payload = [PSCustomObject]@{
+    modelPreference = $ModelPreference
+    expectedProject = $ExpectedProject
+    expectedChat = $ExpectedChat
+  } | ConvertTo-Json -Compress
+
+  $payloadFile = Join-Path ([System.IO.Path]::GetTempPath()) ("antigravity-switch-model-{0}.json" -f ([guid]::NewGuid().ToString("N")))
+  try {
+    [System.IO.File]::WriteAllText($payloadFile, $payload, [System.Text.UTF8Encoding]::new($false))
+    & node $localMcpScript switch-model-cli --json-file $payloadFile
+    if ($LASTEXITCODE -ne 0) {
+      throw "switch-model failed with exit code $LASTEXITCODE"
     }
   } finally {
     Remove-Item -LiteralPath $payloadFile -Force -ErrorAction SilentlyContinue
@@ -1005,6 +1034,10 @@ switch ($Command) {
 
   "prepare-offload" {
     Get-PrepareOffloadText
+  }
+
+  "switch-model" {
+    Invoke-SwitchModel
   }
 
   "submit-offload" {

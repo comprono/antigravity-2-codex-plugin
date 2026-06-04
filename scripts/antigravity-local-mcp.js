@@ -89,10 +89,25 @@ const tools = [
         nextStep: { type: "string", description: "Specific next action.", default: "Inspect the relevant files and write a compact status checkpoint." },
         expectedProject: { type: "string", description: "Optional visible project text that must be present before submit." },
         expectedChat: { type: "string", description: "Optional visible chat/conversation text that must be present before submit." },
+        modelPreference: { type: "string", description: "Model preference before submit. Use auto, flash-medium, flash, best-available, or an exact visible model name.", default: "auto" },
+        skipModelSwitch: { type: "boolean", description: "Set true only when the current model was just verified manually.", default: false },
         submit: { type: "boolean", description: "Set true to fill and click Send.", default: false },
         fillOnly: { type: "boolean", description: "Set true to fill the composer without clicking Send. Use only when the user wants a manual review before submit.", default: false },
       },
       required: ["goal", "submit"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "switch-model",
+    description: "Switch the active Antigravity chat to an available model through the local CDP bridge. Use before offloads when Sonnet/Opus is exhausted or when the user asks for Flash.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        modelPreference: { type: "string", description: "auto, flash-medium, flash, best-available, or an exact visible model name.", default: "flash-medium" },
+        expectedProject: { type: "string", description: "Optional visible project text that must be present before switching." },
+        expectedChat: { type: "string", description: "Optional visible chat/conversation text that must be present before switching." },
+      },
       additionalProperties: false,
     },
   },
@@ -271,7 +286,7 @@ function buildPrepareOffload(args = {}, quick = null) {
   ].join("\n");
 
   const nextAction = decision.shouldOffload
-    ? "Use antigravity-devtools only to select the project/chat/model, fill the handoff, and click the Send/arrow button. Then stop monitoring and read only the status artifact or targeted diff."
+    ? "First call antigravity-local.switch-model with modelPreference=auto or flash-medium. Then call submit-offload with submit=true. Avoid raw DevTools choreography unless the direct tools fail."
     : "Do not open or drive Antigravity for this task. Answer or act directly in Codex.";
 
   return [
@@ -377,6 +392,149 @@ function jsString(value) {
   return JSON.stringify(String(value ?? ""));
 }
 
+function availableModelNames(limitsSummary) {
+  return (limitsSummary?.RecommendedAvailable || [])
+    .map((entry) => String(entry.DisplayName || entry.Id || "").trim())
+    .filter(Boolean);
+}
+
+function choosePreferredModel(limitsSummary, preference = "auto") {
+  return choosePreferredModelCandidates(limitsSummary, preference)[0] || "";
+}
+
+function choosePreferredModelCandidates(limitsSummary, preference = "auto") {
+  const names = availableModelNames(limitsSummary);
+  const requested = String(preference || "auto").trim();
+  const lower = requested.toLowerCase();
+  const exact = names.find((name) => name.toLowerCase() === lower);
+  if (exact) return [exact];
+
+  const matches = (patterns) => names.filter((name) => patterns.every((pattern) => pattern.test(name)));
+  if (lower === "auto" || lower === "flash-medium" || lower === "cheap" || lower === "cost-saving") {
+    return [
+      "Gemini 3.5 Flash (Medium)",
+      ...matches([/gemini/i, /3\.5/i, /flash/i, /medium/i]),
+      ...matches([/gemini/i, /flash/i, /medium/i]),
+      ...matches([/gemini/i, /flash/i]),
+      ...names,
+    ].filter((name, index, all) => name && all.indexOf(name) === index);
+  }
+  if (lower === "flash") {
+    return [
+      "Gemini 3.5 Flash (Medium)",
+      ...matches([/gemini/i, /flash/i]),
+      ...names,
+    ].filter((name, index, all) => name && all.indexOf(name) === index);
+  }
+  if (lower === "best-available") {
+    return names;
+  }
+  return [requested];
+}
+
+async function switchModelInCurrentChat(args = {}) {
+  const expectedProject = String(args.expectedProject || "").trim();
+  const expectedChat = String(args.expectedChat || "").trim();
+  let limitsSummary = null;
+  try {
+    limitsSummary = await runHelper("limits-summary");
+  } catch {
+    // The visible model picker remains the fallback source of truth.
+  }
+  const targetCandidates = choosePreferredModelCandidates(limitsSummary, args.modelPreference || "flash-medium");
+  if (!targetCandidates.length) {
+    return "SwitchModelResult:\nOk: false\nStage: choose-model\nMessage: No available model could be chosen from limits-summary.";
+  }
+  const targetModel = targetCandidates[0];
+
+  const { port, page } = await getAntigravityPage();
+  const client = await createCdpClient(page.webSocketDebuggerUrl);
+
+  const expression = `
+(async () => {
+  const expectedProject = ${jsString(expectedProject)};
+  const expectedChat = ${jsString(expectedChat)};
+  const targetCandidates = ${JSON.stringify(targetCandidates)};
+  const candidateNeedles = targetCandidates.map((name) => String(name).toLowerCase());
+  const visibleText = document.body ? document.body.innerText || "" : "";
+  const missing = [];
+  if (expectedProject && !visibleText.includes(expectedProject)) missing.push("expectedProject");
+  if (expectedChat && !visibleText.includes(expectedChat)) missing.push("expectedChat");
+  if (missing.length) return { ok: false, stage: "verify", missing };
+
+  const isVisible = (el) => {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+  };
+  const labelFor = (el) => [el.ariaLabel, el.title, el.innerText, el.textContent].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim();
+  const buttons = () => Array.from(document.querySelectorAll('button,[role="button"]')).filter(isVisible);
+  const currentButton = buttons().find((el) => /select model, current:/i.test(labelFor(el)));
+  const currentLabel = currentButton ? labelFor(currentButton) : "";
+  const currentNeedle = candidateNeedles.find((needle) => currentLabel.toLowerCase().includes(needle));
+  if (currentNeedle) {
+    return { ok: true, stage: "already-selected", selectedModel: targetCandidates[candidateNeedles.indexOf(currentNeedle)], currentLabel };
+  }
+  if (!currentButton) return { ok: false, stage: "find-selector", message: "No visible model selector found." };
+
+  currentButton.click();
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  let optionButtons = buttons();
+  let selectedModel = "";
+  let option = null;
+  for (let i = 0; i < candidateNeedles.length; i += 1) {
+    const needle = candidateNeedles[i];
+    option = optionButtons.find((el) => labelFor(el).toLowerCase() === needle)
+      || optionButtons.find((el) => labelFor(el).toLowerCase().includes(needle));
+    if (option) {
+      selectedModel = targetCandidates[i];
+      break;
+    }
+  }
+  if (!option) {
+    const visibleOptions = optionButtons.map(labelFor).filter((text) => /gemini|claude|gpt|flash|sonnet|opus/i.test(text));
+    return { ok: false, stage: "find-option", selectedModel: targetCandidates[0], visibleOptions };
+  }
+  option.click();
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  const afterButton = buttons().find((el) => /select model, current:/i.test(labelFor(el)));
+  const afterLabel = afterButton ? labelFor(afterButton) : "";
+  const selectedNeedle = selectedModel.toLowerCase();
+  return {
+    ok: afterLabel.toLowerCase().includes(selectedNeedle),
+    stage: afterLabel.toLowerCase().includes(selectedNeedle) ? "selected" : "selected-unverified",
+    selectedModel,
+    currentLabel: afterLabel
+  };
+})()
+`;
+
+  try {
+    const result = await client.send("Runtime.evaluate", {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    const value = result?.result?.value || {};
+    return [
+      "SwitchModelResult:",
+      `DevToolsPort: ${port}`,
+      `PageTitle: ${page.title || "<unknown>"}`,
+      `Requested: ${String(args.modelPreference || "flash-medium")}`,
+      `Chosen: ${value.selectedModel || targetModel}`,
+      `Ok: ${value.ok === true}`,
+      `Stage: ${value.stage || "<unknown>"}`,
+      value.currentLabel ? `CurrentLabel: ${value.currentLabel}` : null,
+      value.missing?.length ? `Missing: ${value.missing.join(", ")}` : null,
+      value.visibleOptions?.length ? `VisibleOptions: ${value.visibleOptions.slice(0, 8).join(" | ")}` : null,
+      value.message ? `Message: ${value.message}` : null,
+    ].filter(Boolean).join("\n");
+  } finally {
+    client.close();
+  }
+}
+
 async function submitOffloadToCurrentChat(args = {}) {
   const { decision } = getOffloadDecision({ ...args, hasWorkspaceWork: true, estimatedCodexInputTokens: 2000 });
   if (decision !== "offload-to-antigravity") {
@@ -388,6 +546,18 @@ async function submitOffloadToCurrentChat(args = {}) {
   const expectedChat = String(args.expectedChat || "").trim();
   const submit = Boolean(args.submit);
   const fillOnly = Boolean(args.fillOnly);
+  const skipModelSwitch = Boolean(args.skipModelSwitch);
+  let switchResult = "";
+  if (!skipModelSwitch) {
+    switchResult = await switchModelInCurrentChat({
+      expectedProject,
+      expectedChat,
+      modelPreference: args.modelPreference || "auto",
+    });
+    if (!/Ok: true/.test(switchResult)) {
+      return `${switchResult}\n\nSubmitOffloadResult:\nOk: false\nStage: model-switch\nSubmitted: false\nMessage: Refusing to submit while the requested/available model is not verified.`;
+    }
+  }
   const { port, page } = await getAntigravityPage();
   const client = await createCdpClient(page.webSocketDebuggerUrl);
 
@@ -518,6 +688,8 @@ async function submitOffloadToCurrentChat(args = {}) {
       };
     }
     return [
+      switchResult || null,
+      switchResult ? "" : null,
       "SubmitOffloadResult:",
       `DevToolsPort: ${port}`,
       `PageTitle: ${page.title || "<unknown>"}`,
@@ -634,6 +806,12 @@ async function handleRequest(message) {
         return;
       }
 
+      if (name === "switch-model") {
+        const text = await switchModelInCurrentChat(params?.arguments || {});
+        sendResult(id, { content: [{ type: "text", text }] });
+        return;
+      }
+
       const command = name === "models" ? "limits" : name;
       const result = await runHelper(command);
       sendResult(id, {
@@ -655,7 +833,7 @@ async function handleRequest(message) {
   }
 }
 
-if (process.argv[2] === "submit-offload-cli") {
+if (process.argv[2] === "submit-offload-cli" || process.argv[2] === "switch-model-cli") {
   let args = {};
   try {
     if (process.argv[3] === "--json-file") {
@@ -668,14 +846,15 @@ if (process.argv[2] === "submit-offload-cli") {
     process.exit(2);
   }
 
-  submitOffloadToCurrentChat(args)
+  const action = process.argv[2] === "switch-model-cli" ? switchModelInCurrentChat : submitOffloadToCurrentChat;
+  action(args)
     .then((text) => {
       console.log(text);
-      process.exit(0);
+      process.exitCode = 0;
     })
     .catch((error) => {
       console.error(error?.message || String(error));
-      process.exit(1);
+      process.exitCode = 1;
     });
   return;
 }

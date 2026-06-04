@@ -13,3 +13,6 @@ __pycache__/
 *.webp
 *.jpg
 *.jpeg
+
+# Local Antigravity runtime/status artifacts
+notes/

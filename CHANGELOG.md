@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Added `switch-model` MCP/PowerShell helper to move the active Antigravity chat to an available cost-saving model such as Gemini 3.5 Flash Medium.
+- Updated `submit-offload` to run a model gate by default and refuse submission if the requested/available model cannot be verified.
+
 ## 0.1.0 - 2026-06-03
 
 - Initial public release of the Google Antigravity Codex Plugin.
