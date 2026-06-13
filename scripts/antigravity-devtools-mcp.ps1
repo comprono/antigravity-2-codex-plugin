@@ -18,8 +18,7 @@ if (-not (Test-Path -LiteralPath $mcpBin)) {
 
 $processes = @(Get-Process -Name "Antigravity" -ErrorAction SilentlyContinue)
 if ($processes.Count -eq 0) {
-  Start-Process -FilePath $exePath -WorkingDirectory $installRoot
-  Start-Sleep -Seconds 3
+  throw "Antigravity is not running. This DevTools MCP server is passive and will not open Antigravity during Codex startup. Call antigravity-local.open or antigravity-local.repair-live only when the user asks to use Antigravity, then restart Codex if DevTools tools are needed."
 }
 
 function Get-LivePageCount {
@@ -39,8 +38,7 @@ function Get-LivePageCount {
 }
 
 if ((Get-LivePageCount) -eq 0) {
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $helperScript repair-live | Out-Null
-  Start-Sleep -Seconds 2
+  throw "Antigravity is running but has no inspectable DevTools pages. This DevTools MCP server will not repair/restart Antigravity during Codex startup. Call antigravity-local.repair-live only when the user asks to use Antigravity, then restart Codex if DevTools tools are needed."
 }
 
 if (-not (Test-Path -LiteralPath $devToolsPortFile)) {
