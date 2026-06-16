@@ -104,7 +104,7 @@ const tools = [
         nextStep: { type: "string", description: "Specific next action.", default: "Inspect the relevant files and write compact artifacts." },
         expectedProject: { type: "string", description: "Optional visible project text that must be present before submit." },
         expectedChat: { type: "string", description: "Optional visible chat/conversation text that must be present before submit." },
-        modelPreference: { type: "string", description: "auto, flash-medium, flash, best-available, or exact visible model name.", default: "auto" },
+        modelPreference: { type: "string", description: "auto, flash-high, flash-medium, flash, best-available, or exact visible model name.", default: "auto" },
         submit: { type: "boolean", description: "Set true to fill and submit the job handoff.", default: true },
       },
       required: ["goal", "workspace"],
@@ -161,7 +161,7 @@ const tools = [
         jobId: { type: "string", description: "Job id. Use latest to retry the newest job.", default: "latest" },
         expectedProject: { type: "string", description: "Optional visible project text that must be present before submit." },
         expectedChat: { type: "string", description: "Optional visible chat/conversation text that must be present before submit." },
-        modelPreference: { type: "string", description: "auto, flash-medium, flash, best-available, or exact visible model name.", default: "auto" },
+        modelPreference: { type: "string", description: "auto, flash-high, flash-medium, flash, best-available, or exact visible model name.", default: "auto" },
         submit: { type: "boolean", description: "Set true to fill and submit the job handoff.", default: true },
       },
       required: ["workspace"],
@@ -180,7 +180,7 @@ const tools = [
         nextStep: { type: "string", description: "Specific next action.", default: "Inspect the relevant files and write a compact status checkpoint." },
         expectedProject: { type: "string", description: "Optional visible project text that must be present before submit." },
         expectedChat: { type: "string", description: "Optional visible chat/conversation text that must be present before submit." },
-        modelPreference: { type: "string", description: "Model preference before submit. Use auto, flash-medium, flash, best-available, or an exact visible model name.", default: "auto" },
+        modelPreference: { type: "string", description: "Model preference before submit. Use auto, flash-high, flash-medium, flash, best-available, or an exact visible model name.", default: "auto" },
         skipModelSwitch: { type: "boolean", description: "Set true only when the current model was just verified manually.", default: false },
         submit: { type: "boolean", description: "Set true to fill and click Send.", default: false },
         fillOnly: { type: "boolean", description: "Set true to fill the composer without clicking Send. Use only when the user wants a manual review before submit.", default: false },
@@ -195,7 +195,7 @@ const tools = [
     inputSchema: {
       type: "object",
       properties: {
-        modelPreference: { type: "string", description: "auto, flash-medium, flash, best-available, or an exact visible model name.", default: "flash-medium" },
+        modelPreference: { type: "string", description: "auto, flash-high, flash-medium, flash, best-available, or an exact visible model name.", default: "flash-medium" },
         expectedProject: { type: "string", description: "Optional visible project text that must be present before switching." },
         expectedChat: { type: "string", description: "Optional visible chat/conversation text that must be present before switching." },
       },
@@ -720,6 +720,16 @@ function markJobSubmitted(workspace, jobId) {
   writeJsonFile(statusPath, status);
 }
 
+function markJobSubmitFailed(workspace, jobId, reason) {
+  const statusPath = path.join(jobDirFor(workspace, jobId), "status.json");
+  const status = readJsonFile(statusPath, { jobId });
+  status.state = "submit_failed";
+  status.updatedAt = utcStamp();
+  status.currentStep = "submit-failed";
+  status.blocker = String(reason || "Antigravity did not confirm prompt submission.").slice(0, 1000);
+  writeJsonFile(statusPath, status);
+}
+
 function buildJobHandoff(workspace, jobId) {
   const jobDir = jobDirFor(workspace, jobId);
   const request = summarizeFile(path.join(jobDir, "request.md"), 16000);
@@ -748,6 +758,15 @@ function choosePreferredModelCandidates(limitsSummary, preference = "auto") {
   if (exact) return [exact];
 
   const matches = (patterns) => names.filter((name) => patterns.every((pattern) => pattern.test(name)));
+  if (lower === "flash-high" || lower === "high-flash" || lower === "gemini-flash-high") {
+    return [
+      "Gemini 3.5 Flash (High)",
+      ...matches([/gemini/i, /3\.5/i, /flash/i, /high/i]),
+      ...matches([/gemini/i, /flash/i, /high/i]),
+      ...matches([/gemini/i, /flash/i]),
+      ...names,
+    ].filter((name, index, all) => name && all.indexOf(name) === index);
+  }
   if (lower === "auto" || lower === "flash-medium" || lower === "cheap" || lower === "cost-saving") {
     return [
       "Gemini 3.5 Flash (Medium)",
@@ -795,9 +814,10 @@ async function switchModelInCurrentChat(args = {}) {
   const targetCandidates = ${JSON.stringify(targetCandidates)};
   const candidateNeedles = targetCandidates.map((name) => String(name).toLowerCase());
   const visibleText = document.body ? document.body.innerText || "" : "";
+  const activeTitle = document.title || "";
   const missing = [];
   if (expectedProject && !visibleText.includes(expectedProject)) missing.push("expectedProject");
-  if (expectedChat && !visibleText.includes(expectedChat)) missing.push("expectedChat");
+  if (expectedChat && !activeTitle.toLowerCase().includes(expectedChat.toLowerCase())) missing.push("expectedChatActiveTitle");
   if (missing.length) return { ok: false, stage: "verify", missing };
 
   const isVisible = (el) => {
@@ -909,11 +929,13 @@ async function submitOffloadToCurrentChat(args = {}) {
   const shouldSubmit = ${submit ? "true" : "false"};
   const shouldFillOnly = ${fillOnly ? "true" : "false"};
   const visibleText = document.body ? document.body.innerText || "" : "";
+  const activeTitle = document.title || "";
   const missing = [];
   if (expectedProject && !visibleText.includes(expectedProject)) missing.push("expectedProject");
-  if (expectedChat && !visibleText.includes(expectedChat)) missing.push("expectedChat");
+  if (expectedChat && !activeTitle.toLowerCase().includes(expectedChat.toLowerCase())) missing.push("expectedChatActiveTitle");
+  if (/new conversation|new chat/i.test(activeTitle)) missing.push("activeExistingChat");
   if (missing.length) {
-    return { ok: false, stage: "verify", missing, submitted: false };
+    return { ok: false, stage: "verify", missing, submitted: false, activeTitle };
   }
 
   if (!shouldSubmit && !shouldFillOnly) {
@@ -964,12 +986,22 @@ async function submitOffloadToCurrentChat(args = {}) {
     })
     .sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right)[0];
   const sendButton = labeled || nearby;
+  if (sendButton) {
+    sendButton.click();
+    return {
+      ok: true,
+      stage: "send-clicked",
+      submitted: false,
+      promptLength: prompt.length,
+      submitMethod: "click"
+    };
+  }
   return {
     ok: true,
     stage: "filled-ready-for-enter",
     submitted: false,
     promptLength: prompt.length,
-    hasSendButton: Boolean(sendButton)
+    hasSendButton: false
   };
 })()
 `;
@@ -998,12 +1030,15 @@ async function submitOffloadToCurrentChat(args = {}) {
         windowsVirtualKeyCode: 13,
         nativeVirtualKeyCode: 13,
       });
+      value = { ...value, submitMethod: "enter" };
+    }
+    if (submit && value.ok === true && (value.stage === "filled-ready-for-enter" || value.stage === "send-clicked")) {
       await new Promise((resolve) => setTimeout(resolve, 500));
       const afterEnter = await client.send("Runtime.evaluate", {
         expression: `
 (() => {
   const visibleText = document.body ? document.body.innerText || "" : "";
-  const busy = /working|worked for|stop|cancel|running|thinking/i.test(visibleText);
+  const runningNow = /\\b(stop|cancel|running|thinking|generating|working)\\b/i.test(visibleText);
   const composer = Array.from(document.querySelectorAll('textarea,input,[contenteditable="true"],[role="textbox"],[role="combobox"]'))
     .filter((el) => {
       const rect = el.getBoundingClientRect();
@@ -1012,19 +1047,25 @@ async function submitOffloadToCurrentChat(args = {}) {
     })
     .sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
   const composerText = composer ? (composer.value || composer.innerText || composer.textContent || "") : "";
-  return { busy, composerStillHasPrompt: composerText.includes(${jsString(handoff.slice(0, 80))}) };
+  const promptHead = ${jsString(handoff.slice(0, 80))};
+  const composerStillHasPrompt = composerText.includes(promptHead);
+  const visibleHasPrompt = visibleText.includes(promptHead);
+  return { runningNow, composerStillHasPrompt, visibleHasPrompt, composerLength: composerText.length };
 })()
 `,
         awaitPromise: true,
         returnByValue: true,
       });
       const afterValue = afterEnter?.result?.value || {};
+      const submitted = afterValue.composerStillHasPrompt !== true && (afterValue.visibleHasPrompt === true || afterValue.runningNow === true);
       value = {
         ...value,
-        stage: afterValue.composerStillHasPrompt ? "enter-dispatched-unconfirmed" : "enter-submitted",
-        submitted: !afterValue.composerStillHasPrompt || afterValue.busy === true,
-        enterDispatched: true,
-        busy: afterValue.busy === true,
+        stage: submitted ? `${value.submitMethod || "submit"}-submitted` : `${value.submitMethod || "submit"}-unconfirmed`,
+        submitted,
+        enterDispatched: value.submitMethod === "enter",
+        runningNow: afterValue.runningNow === true,
+        composerStillHasPrompt: afterValue.composerStillHasPrompt === true,
+        visibleHasPrompt: afterValue.visibleHasPrompt === true,
       };
     }
     return [
@@ -1036,6 +1077,9 @@ async function submitOffloadToCurrentChat(args = {}) {
       `Ok: ${value.ok === true}`,
       `Stage: ${value.stage || "<unknown>"}`,
       `Submitted: ${value.submitted === true}`,
+      value.activeTitle ? `ActiveTitle: ${value.activeTitle}` : null,
+      value.submitMethod ? `SubmitMethod: ${value.submitMethod}` : null,
+      value.composerStillHasPrompt === true ? "ComposerStillHasPrompt: true" : null,
       value.missing?.length ? `Missing: ${value.missing.join(", ")}` : null,
       value.message ? `Message: ${value.message}` : null,
       "Next: If Submitted is true, stop monitoring every UI step and read only the requested status artifact or targeted diff.",
@@ -1049,19 +1093,26 @@ async function submitJob(args = {}) {
   const created = createJob(args);
   const handoffText = buildJobHandoff(created.workspace, created.jobId);
   const submit = args.submit !== false;
-  const text = await submitOffloadToCurrentChat({
-    goal: `Execute Antigravity bridge job ${created.jobId}`,
-    workspace: created.workspace,
-    statusFile: path.join(created.jobDir, "status.json"),
-    nextStep: `Read request.md in ${created.jobDir} and write the required bridge artifacts.`,
-    expectedProject: args.expectedProject || "",
-    expectedChat: args.expectedChat || "",
-    modelPreference: args.modelPreference || "auto",
-    submit,
-    handoffText,
-  });
+  let text = "";
+  try {
+    text = await submitOffloadToCurrentChat({
+      goal: `Execute Antigravity bridge job ${created.jobId}`,
+      workspace: created.workspace,
+      statusFile: path.join(created.jobDir, "status.json"),
+      nextStep: `Read request.md in ${created.jobDir} and write the required bridge artifacts.`,
+      expectedProject: args.expectedProject || "",
+      expectedChat: args.expectedChat || "",
+      modelPreference: args.modelPreference || "auto",
+      submit,
+      handoffText,
+    });
+  } catch (error) {
+    text = `SubmitOffloadResult:\nOk: false\nStage: exception\nSubmitted: false\nMessage: ${error?.message || String(error)}`;
+  }
   if (/Submitted: true/.test(text)) {
     markJobSubmitted(created.workspace, created.jobId);
+  } else if (submit) {
+    markJobSubmitFailed(created.workspace, created.jobId, text);
   }
   return [
     "SubmitJobResult:",
@@ -1081,19 +1132,26 @@ async function retryJob(args = {}) {
   const jobDir = jobDirFor(workspace, jobId);
   const handoffText = buildJobHandoff(workspace, jobId);
   const submit = args.submit !== false;
-  const text = await submitOffloadToCurrentChat({
-    goal: `Retry Antigravity bridge job ${jobId}`,
-    workspace,
-    statusFile: path.join(jobDir, "status.json"),
-    nextStep: `Retry request.md in ${jobDir} and overwrite the required bridge artifacts.`,
-    expectedProject: args.expectedProject || "",
-    expectedChat: args.expectedChat || "",
-    modelPreference: args.modelPreference || "auto",
-    submit,
-    handoffText,
-  });
+  let text = "";
+  try {
+    text = await submitOffloadToCurrentChat({
+      goal: `Retry Antigravity bridge job ${jobId}`,
+      workspace,
+      statusFile: path.join(jobDir, "status.json"),
+      nextStep: `Retry request.md in ${jobDir} and overwrite the required bridge artifacts.`,
+      expectedProject: args.expectedProject || "",
+      expectedChat: args.expectedChat || "",
+      modelPreference: args.modelPreference || "auto",
+      submit,
+      handoffText,
+    });
+  } catch (error) {
+    text = `SubmitOffloadResult:\nOk: false\nStage: exception\nSubmitted: false\nMessage: ${error?.message || String(error)}`;
+  }
   if (/Submitted: true/.test(text)) {
     markJobSubmitted(workspace, jobId);
+  } else if (submit) {
+    markJobSubmitFailed(workspace, jobId, text);
   }
   return [
     "RetryJobResult:",

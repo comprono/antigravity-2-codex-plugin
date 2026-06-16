@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Hardened selected-chat verification so `expectedChat` must match the active Antigravity document title before model switching or submission.
+- Hardened prompt submission verification so jobs are marked `submit_failed` unless Antigravity actually accepts the prompt.
+- Captured DevTools/no-page submission exceptions into `status.json` instead of leaving bridge jobs stuck in `queued`.
+- Added `flash-high` model preference for Gemini 3.5 Flash High routing.
 - Made `antigravity-devtools` startup passive so opening Codex no longer opens, closes, restarts, or repairs Antigravity unless the user explicitly asks to use it.
 - Added durable bridge job tools: `create-job`, `submit-job`, `list-jobs`, `read-job`, `cancel-job`, and `retry-job`.
 - Added the `.antigravity-bridge/jobs/<jobId>/` artifact contract for `request.md`, `status.json`, `result.md`, `changed-files.txt`, `diff.patch`, and `test-output-summary.md`.
