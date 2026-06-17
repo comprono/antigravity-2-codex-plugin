@@ -815,9 +815,19 @@ async function switchModelInCurrentChat(args = {}) {
   const candidateNeedles = targetCandidates.map((name) => String(name).toLowerCase());
   const visibleText = document.body ? document.body.innerText || "" : "";
   const activeTitle = document.title || "";
+  const activeContextText = Array.from(document.querySelectorAll('body *'))
+    .filter((el) => {
+      if (el.closest('nav,aside,[role="navigation"]')) return false;
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.top < 240 && style.visibility !== "hidden" && style.display !== "none";
+    })
+    .map((el) => el.innerText || el.textContent || "")
+    .join(" ")
+    .replace(/\\s+/g, " ");
   const missing = [];
   if (expectedProject && !visibleText.includes(expectedProject)) missing.push("expectedProject");
-  if (expectedChat && !activeTitle.toLowerCase().includes(expectedChat.toLowerCase())) missing.push("expectedChatActiveTitle");
+  if (expectedChat && !(activeTitle + " " + activeContextText).toLowerCase().includes(expectedChat.toLowerCase())) missing.push("expectedChatActiveContext");
   if (missing.length) return { ok: false, stage: "verify", missing };
 
   const isVisible = (el) => {
@@ -930,9 +940,19 @@ async function submitOffloadToCurrentChat(args = {}) {
   const shouldFillOnly = ${fillOnly ? "true" : "false"};
   const visibleText = document.body ? document.body.innerText || "" : "";
   const activeTitle = document.title || "";
+  const activeContextText = Array.from(document.querySelectorAll('body *'))
+    .filter((el) => {
+      if (el.closest('nav,aside,[role="navigation"]')) return false;
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.top < 240 && style.visibility !== "hidden" && style.display !== "none";
+    })
+    .map((el) => el.innerText || el.textContent || "")
+    .join(" ")
+    .replace(/\\s+/g, " ");
   const missing = [];
   if (expectedProject && !visibleText.includes(expectedProject)) missing.push("expectedProject");
-  if (expectedChat && !activeTitle.toLowerCase().includes(expectedChat.toLowerCase())) missing.push("expectedChatActiveTitle");
+  if (expectedChat && !(activeTitle + " " + activeContextText).toLowerCase().includes(expectedChat.toLowerCase())) missing.push("expectedChatActiveContext");
   if (/new conversation|new chat/i.test(activeTitle)) missing.push("activeExistingChat");
   if (missing.length) {
     return { ok: false, stage: "verify", missing, submitted: false, activeTitle };
@@ -1067,6 +1087,78 @@ async function submitOffloadToCurrentChat(args = {}) {
         composerStillHasPrompt: afterValue.composerStillHasPrompt === true,
         visibleHasPrompt: afterValue.visibleHasPrompt === true,
       };
+      if (value.submitMethod === "click" && value.submitted !== true && value.composerStillHasPrompt === true) {
+        await client.send("Runtime.evaluate", {
+          expression: `
+(() => {
+  const isVisible = (el) => {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+  };
+  const composer = Array.from(document.querySelectorAll('textarea,input,[contenteditable="true"],[role="textbox"],[role="combobox"]'))
+    .filter((el) => isVisible(el) && !el.disabled && !el.readOnly)
+    .sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
+  if (composer) composer.focus();
+  return Boolean(composer);
+})()
+`,
+          awaitPromise: true,
+          returnByValue: true,
+        });
+        await client.send("Input.dispatchKeyEvent", {
+          type: "rawKeyDown",
+          key: "Enter",
+          code: "Enter",
+          windowsVirtualKeyCode: 13,
+          nativeVirtualKeyCode: 13,
+          unmodifiedText: "\r",
+          text: "\r",
+        });
+        await client.send("Input.dispatchKeyEvent", {
+          type: "keyUp",
+          key: "Enter",
+          code: "Enter",
+          windowsVirtualKeyCode: 13,
+          nativeVirtualKeyCode: 13,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        const afterFallbackEnter = await client.send("Runtime.evaluate", {
+          expression: `
+(() => {
+  const visibleText = document.body ? document.body.innerText || "" : "";
+  const runningNow = /\\b(stop|cancel|running|thinking|generating|working)\\b/i.test(visibleText);
+  const composer = Array.from(document.querySelectorAll('textarea,input,[contenteditable="true"],[role="textbox"],[role="combobox"]'))
+    .filter((el) => {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+    })
+    .sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0];
+  const composerText = composer ? (composer.value || composer.innerText || composer.textContent || "") : "";
+  const promptHead = ${jsString(handoff.slice(0, 80))};
+  const composerStillHasPrompt = composerText.includes(promptHead);
+  const visibleHasPrompt = visibleText.includes(promptHead);
+  return { runningNow, composerStillHasPrompt, visibleHasPrompt, composerLength: composerText.length };
+})()
+`,
+          awaitPromise: true,
+          returnByValue: true,
+        });
+        const fallbackValue = afterFallbackEnter?.result?.value || {};
+        const fallbackSubmitted = fallbackValue.composerStillHasPrompt !== true && (fallbackValue.visibleHasPrompt === true || fallbackValue.runningNow === true);
+        value = {
+          ...value,
+          stage: fallbackSubmitted ? "click-then-enter-submitted" : "click-then-enter-unconfirmed",
+          submitted: fallbackSubmitted,
+          submitMethod: "click-then-enter",
+          enterDispatched: true,
+          runningNow: fallbackValue.runningNow === true,
+          composerStillHasPrompt: fallbackValue.composerStillHasPrompt === true,
+          visibleHasPrompt: fallbackValue.visibleHasPrompt === true,
+        };
+      }
     }
     return [
       switchResult || null,
