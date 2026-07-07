@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added official Antigravity CLI (`agy`) support with `agy-status`, `agy-models`, and `submit-agy-job` for low-RAM headless work before desktop UI fallback.
+- Updated the skill and README so Codex chooses CLI-first routing automatically when visible Antigravity UI state is not required.
 - Hardened selected-chat verification so `expectedChat` must match the active Antigravity document title before model switching or submission.
 - Hardened prompt submission verification so jobs are marked `submit_failed` unless Antigravity actually accepts the prompt.
 - Captured DevTools/no-page submission exceptions into `status.json` instead of leaving bridge jobs stuck in `queued`.

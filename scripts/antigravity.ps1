@@ -1,6 +1,6 @@
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("status", "open", "repair-live", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy", "devtools-health", "submission-guide", "offload-advice", "handoff-template", "prepare-offload", "create-job", "submit-job", "list-jobs", "read-job", "cancel-job", "retry-job", "switch-model", "submit-offload")]
+  [ValidateSet("status", "open", "repair-live", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy", "devtools-health", "submission-guide", "offload-advice", "handoff-template", "prepare-offload", "create-job", "submit-job", "agy-status", "agy-models", "submit-agy-job", "list-jobs", "read-job", "cancel-job", "retry-job", "switch-model", "submit-offload")]
   [string] $Command = "status",
 
   [string] $Goal = "",
@@ -13,10 +13,16 @@ param(
   [string] $Mode = "fast",
   [string] $JobId = "latest",
   [string] $Reason = "Cancelled by Codex.",
+  [string] $AgyModel = "gemini-3.5-flash-low",
+  [string] $AgyProject = "",
+  [string] $AgyConversation = "",
+  [string] $AgyPrintTimeout = "5m",
   [int] $Limit = 10,
   [object] $Submit = $null,
   [object] $FillOnly = $false,
   [object] $SkipModelSwitch = $false,
+  [object] $AgyContinueLatest = $false,
+  [object] $AgySandbox = $true,
   [object] $HasWorkspaceWork = $true,
   [int] $EstimatedCodexInputTokens = 2000
 )
@@ -974,6 +980,48 @@ function Invoke-BridgeJobCommand {
   }
 }
 
+function Invoke-AgyBridgeCommand {
+  param(
+    [string] $CliCommand
+  )
+
+  $localMcpScript = Join-Path $PSScriptRoot "antigravity-local-mcp.js"
+  if (-not (Test-Path -LiteralPath $localMcpScript)) {
+    throw "antigravity-local-mcp.js was not found at $localMcpScript"
+  }
+
+  $continueLatestValue = ConvertTo-BooleanValue -Value $AgyContinueLatest -Default $false
+  $sandboxValue = ConvertTo-BooleanValue -Value $AgySandbox -Default $true
+  $startValue = ConvertTo-BooleanValue -Value $Submit -Default $true
+  $payload = [PSCustomObject]@{
+    goal = $Goal
+    workspace = $Workspace
+    mode = $Mode
+    nextStep = $NextStep
+    jobId = $JobId
+    limit = $Limit
+    model = $AgyModel
+    agyModel = $AgyModel
+    project = $AgyProject
+    conversation = $AgyConversation
+    printTimeout = $AgyPrintTimeout
+    continueLatest = $continueLatestValue
+    sandbox = $sandboxValue
+    start = $startValue
+  } | ConvertTo-Json -Compress
+
+  $payloadFile = Join-Path ([System.IO.Path]::GetTempPath()) ("antigravity-agy-job-{0}.json" -f ([guid]::NewGuid().ToString("N")))
+  try {
+    [System.IO.File]::WriteAllText($payloadFile, $payload, [System.Text.UTF8Encoding]::new($false))
+    & node $localMcpScript $CliCommand --json-file $payloadFile
+    if ($LASTEXITCODE -ne 0) {
+      throw "$CliCommand failed with exit code $LASTEXITCODE"
+    }
+  } finally {
+    Remove-Item -LiteralPath $payloadFile -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Write-Status {
   $processes = @(Get-AntigravityProcess)
   $devToolsPort = Get-DevToolsPort
@@ -1083,6 +1131,18 @@ switch ($Command) {
 
   "submit-job" {
     Invoke-BridgeJobCommand -CliCommand "submit-job-cli"
+  }
+
+  "agy-status" {
+    Invoke-AgyBridgeCommand -CliCommand "agy-status-cli"
+  }
+
+  "agy-models" {
+    Invoke-AgyBridgeCommand -CliCommand "agy-models-cli"
+  }
+
+  "submit-agy-job" {
+    Invoke-AgyBridgeCommand -CliCommand "submit-agy-job-cli"
   }
 
   "list-jobs" {

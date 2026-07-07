@@ -7,3 +7,7 @@ codex windows bridge
 local antigravity desktop app
 mcp server for codex
 chromium devtools codex plugin
+antigravity cli codex
+agy cli codex
+headless antigravity codex
+low ram antigravity bridge
