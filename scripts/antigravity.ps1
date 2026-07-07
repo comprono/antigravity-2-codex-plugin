@@ -1,6 +1,6 @@
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("status", "open", "repair-live", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy", "devtools-health", "submission-guide", "offload-advice", "handoff-template", "prepare-offload", "create-job", "submit-job", "claude-status", "submit-claude-job", "list-jobs", "read-job", "cancel-job", "retry-job", "switch-model", "submit-offload")]
+  [ValidateSet("status", "open", "repair-live", "inspect", "path", "models", "limits", "limits-summary", "quick", "live", "setup", "doctor", "privacy", "devtools-health", "submission-guide", "offload-advice", "handoff-template", "prepare-offload", "create-job", "submit-job", "list-jobs", "read-job", "cancel-job", "retry-job", "switch-model", "submit-offload")]
   [string] $Command = "status",
 
   [string] $Goal = "",
@@ -10,16 +10,11 @@ param(
   [string] $ExpectedProject = "",
   [string] $ExpectedChat = "",
   [string] $ModelPreference = "auto",
-  [string] $ClaudeModel = "sonnet",
-  [string] $ClaudeFallbackModel = "",
-  [string] $ClaudePermissionMode = "",
-  [string] $ClaudeMaxBudgetUsd = "",
   [string] $Mode = "fast",
   [string] $JobId = "latest",
   [string] $Reason = "Cancelled by Codex.",
   [int] $Limit = 10,
   [object] $Submit = $null,
-  [object] $Start = $true,
   [object] $FillOnly = $false,
   [object] $SkipModelSwitch = $false,
   [object] $HasWorkspaceWork = $true,
@@ -979,43 +974,6 @@ function Invoke-BridgeJobCommand {
   }
 }
 
-function Invoke-ClaudeBridgeCommand {
-  param(
-    [string] $CliCommand
-  )
-
-  $localMcpScript = Join-Path $PSScriptRoot "antigravity-local-mcp.js"
-  if (-not (Test-Path -LiteralPath $localMcpScript)) {
-    throw "antigravity-local-mcp.js was not found at $localMcpScript"
-  }
-
-  $startValue = ConvertTo-BooleanValue -Value $Start -Default $true
-  $payload = [PSCustomObject]@{
-    goal = $Goal
-    workspace = $Workspace
-    mode = $Mode
-    nextStep = $NextStep
-    model = $ClaudeModel
-    fallbackModel = $ClaudeFallbackModel
-    permissionMode = $ClaudePermissionMode
-    maxBudgetUsd = $ClaudeMaxBudgetUsd
-    start = $startValue
-    jobId = $JobId
-    maxMinutes = 30
-  } | ConvertTo-Json -Compress
-
-  $payloadFile = Join-Path ([System.IO.Path]::GetTempPath()) ("antigravity-claude-job-{0}.json" -f ([guid]::NewGuid().ToString("N")))
-  try {
-    [System.IO.File]::WriteAllText($payloadFile, $payload, [System.Text.UTF8Encoding]::new($false))
-    & node $localMcpScript $CliCommand --json-file $payloadFile
-    if ($LASTEXITCODE -ne 0) {
-      throw "$CliCommand failed with exit code $LASTEXITCODE"
-    }
-  } finally {
-    Remove-Item -LiteralPath $payloadFile -Force -ErrorAction SilentlyContinue
-  }
-}
-
 function Write-Status {
   $processes = @(Get-AntigravityProcess)
   $devToolsPort = Get-DevToolsPort
@@ -1125,14 +1083,6 @@ switch ($Command) {
 
   "submit-job" {
     Invoke-BridgeJobCommand -CliCommand "submit-job-cli"
-  }
-
-  "claude-status" {
-    Invoke-ClaudeBridgeCommand -CliCommand "claude-status-cli"
-  }
-
-  "submit-claude-job" {
-    Invoke-ClaudeBridgeCommand -CliCommand "submit-claude-job-cli"
   }
 
   "list-jobs" {

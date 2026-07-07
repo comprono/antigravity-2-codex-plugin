@@ -6,8 +6,6 @@ This Google Antigravity Codex Plugin is a community local Windows bridge for Cod
 
 This is a local Codex plugin that helps Codex connect to the Antigravity 2.0 desktop app on Windows. It can open Antigravity, inspect whether it is running, discover the Chromium DevTools endpoint exposed by the Electron app, read model quota state from the local language server, inspect visible projects and chats, verify the visible model, and hand off prompts into Antigravity conversations.
 
-It can also use a locally installed Claude Code CLI as an optional headless worker for coding and review jobs, writing the same compact bridge artifacts Codex reads from Antigravity jobs.
-
 After setup, you can start from the ChatGPT mobile app, open Codex, and use this local plugin as the bridge into your Windows Antigravity desktop session.
 
 ## Google Antigravity Codex Plugin
@@ -24,7 +22,6 @@ Keywords: Google Antigravity Codex plugin, OpenAI Codex Antigravity, Antigravity
 - Connects to Antigravity's bundled `chrome-devtools-mcp` server when available.
 - Exposes local setup/model/status and active-model switch commands as MCP tools, so Codex can use them even when skill files are unavailable.
 - Creates durable `.antigravity-bridge/jobs/<jobId>/` folders so Codex can submit work once and later read compact result artifacts.
-- Optionally dispatches durable bridge jobs to local Claude Code headless mode when the `claude` CLI is installed.
 - Helps Codex inspect live project/chat context from the UI.
 - Supports safe handoff to continue an existing chat, start a new chat in an existing project, or start a new project.
 - Provides a local privacy scan for sensitive data before publishing changes.
@@ -35,7 +32,6 @@ Keywords: Google Antigravity Codex plugin, OpenAI Codex Antigravity, Antigravity
 - Antigravity installed at `%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe`.
 - Codex plugins loaded from `%USERPROFILE%\plugins`.
 - Node.js available on `PATH` for the DevTools MCP bridge.
-- Optional: Claude Code CLI available as `claude` on `PATH` and logged in for headless Claude bridge jobs.
 
 ## Install
 
@@ -59,14 +55,12 @@ The setup report tells Codex whether Antigravity is installed, whether Node.js i
 
 The plugin registers two MCP servers:
 
-- `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `submission-guide`, `prepare-offload`, `create-job`, `submit-job`, `claude-status`, `submit-claude-job`, `list-jobs`, `read-job`, `cancel-job`, `retry-job`, `switch-model`, `submit-offload`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
+- `antigravity-local`: direct local tools for `quick`, `setup`, `doctor`, `status`, `open`, `repair-live`, `inspect`, `live`, `devtools-health`, `submission-guide`, `prepare-offload`, `create-job`, `submit-job`, `list-jobs`, `read-job`, `cancel-job`, `retry-job`, `switch-model`, `submit-offload`, `limits-summary`, `limits`, `models`, `offload-advice`, `handoff-template`, and `privacy`.
 - `antigravity-devtools`: Chromium DevTools controls for inspecting and driving the Antigravity UI.
 
 Startup is passive. Opening Codex must not open, close, restart, or repair Antigravity. The DevTools MCP server only connects when Antigravity is already running and inspectable; use `antigravity-local.open` or `antigravity-local.repair-live` only after the user asks to use Antigravity.
 
 Codex should call `antigravity-local.submit-job` first for nontrivial workspace work when the correct Antigravity project/chat is already selected. It creates a durable job folder, prepares the artifact contract, verifies or switches the active model with `modelPreference=auto`, fills the active composer, and submits with a direct CDP Enter keypress, avoiding repeated `list_pages`, snapshots, fill, key, and evaluate calls. Use `antigravity-local.submit-offload` only for lightweight selected-chat handoffs that do not need a durable job folder. If Sonnet/Opus/GPT-OSS is exhausted or the user asks for Flash, Codex should call `antigravity-local.switch-model` with `modelPreference=flash-medium` before submitting. If the MCP tool list is stale and does not show the job/model tools, use the PowerShell helper `antigravity.ps1 submit-job` / `antigravity.ps1 switch-model` before falling back to DevTools choreography. Use `antigravity-local.prepare-offload` when Codex should show the plan first or when the selected chat is uncertain. For nontrivial workspace, repo, browser, UI, research, planning, debugging, review, implementation, and job-application work, the intended cost split is: Antigravity explores and works locally; Codex plans, gates safety, reviews final changes, and summarizes from job artifacts. Use `antigravity-local.quick` for general setup checks. If `ReadyForLiveUiInspection` is false, call `antigravity-local.repair-live` once before using DevTools. If repair restarts Antigravity, an already-started DevTools MCP connection may need to reconnect to the new port. If `antigravity-devtools` fails with `Transport closed`, call `antigravity-local.devtools-health`; do not keep retrying `list_pages` in the same broken transport. Use `limits-summary` for normal quota checks and full `limits` only when the complete per-model JSON is needed.
-
-When the task is local coding or review work and Antigravity UI handoff is not needed, Codex can call `antigravity-local.claude-status` and then `antigravity-local.submit-claude-job`. This uses Claude Code's non-interactive CLI mode, creates the same durable job folder, and returns immediately so Codex can later call `read-job` instead of watching a chat. Use Claude for headless local code work; use Antigravity for visible Antigravity project/chat state, model switching, and desktop UI workflows.
 
 Existing-chat submissions are strict. If `expectedChat` is provided, it must match the active Antigravity document title, not merely a sidebar item or previous message. The helper refuses to submit in a new chat and records `submit_failed` when Antigravity does not accept the prompt. Codex must not wait for artifacts unless the helper returns `Submitted: true`.
 
@@ -212,17 +206,6 @@ powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2
 ```
 
 Modes are `fast`, `deep`, `review`, and `patch`. Use `create-job` when you want to create the folder without touching Antigravity, `retry-job` to resubmit an existing request, and `cancel-job` to mark the bridge job cancelled.
-
-For local Claude Code headless jobs through the PowerShell helper:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2\scripts\antigravity.ps1" claude-status
-powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\plugins\antigravity-2\scripts\antigravity.ps1" submit-claude-job -Goal "<goal>" -Workspace "<path>" -Mode fast -NextStep "<next step>" -ClaudeModel sonnet
-```
-
-Use `-Start false` to create and inspect the job without starting Claude Code. `submit-claude-job` writes into `.antigravity-bridge/jobs/<jobId>/` and returns immediately; call `read-job` later to inspect the compact artifacts. It does not use `--dangerously-skip-permissions` by default. Review mode defaults to Claude Code `plan`; other modes default to `acceptEdits`.
-
-If Claude Code returns `Not logged in`, run Claude Code locally and complete `/login`, then retry the bridge job.
 
 If UI submission is blocked by a stale DevTools port, use `antigravity-local.handoff-template` to generate the compact prompt and avoid repeated CDP probing. Restart Codex or paste the generated handoff manually so the next session attaches to the current Antigravity port.
 
