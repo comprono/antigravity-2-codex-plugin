@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -106,6 +106,32 @@ const tools = [
         expectedChat: { type: "string", description: "Optional visible chat/conversation text that must be present before submit." },
         modelPreference: { type: "string", description: "auto, flash-high, flash-medium, flash, best-available, or exact visible model name.", default: "auto" },
         submit: { type: "boolean", description: "Set true to fill and submit the job handoff.", default: true },
+      },
+      required: ["goal", "workspace"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "claude-status",
+    description: "Report whether local Claude Code CLI is installed and usable for headless bridge jobs. Does not start a job.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "submit-claude-job",
+    description: "Create a durable bridge job and run local Claude Code headlessly against the workspace, writing the same compact artifacts Codex can read later.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "Task goal for Claude Code." },
+        workspace: { type: "string", description: "Local workspace path where .antigravity-bridge/jobs will be created." },
+        mode: { type: "string", description: "fast, deep, review, or patch.", default: "fast" },
+        nextStep: { type: "string", description: "Specific next action.", default: "Inspect the relevant files and write compact artifacts." },
+        model: { type: "string", description: "Claude Code model alias or id, such as sonnet or opus.", default: "sonnet" },
+        fallbackModel: { type: "string", description: "Optional Claude Code fallback model alias or id." },
+        permissionMode: { type: "string", description: "Claude Code permission mode. Defaults to plan for review and acceptEdits otherwise." },
+        maxBudgetUsd: { type: "number", description: "Optional Claude Code maximum spend for this job." },
+        start: { type: "boolean", description: "Set false to create the job and payload without starting Claude Code.", default: true },
+        maxMinutes: { type: "number", description: "Maximum minutes the background Claude worker may run.", default: 30 },
       },
       required: ["goal", "workspace"],
       additionalProperties: false,
@@ -595,6 +621,7 @@ function createJob(args = {}) {
   const status = {
     jobId,
     state: "queued",
+    worker: String(args.worker || "antigravity").trim(),
     mode: String(args.mode || "fast").trim().toLowerCase(),
     createdAt,
     updatedAt: createdAt,
@@ -728,6 +755,300 @@ function markJobSubmitFailed(workspace, jobId, reason) {
   status.currentStep = "submit-failed";
   status.blocker = String(reason || "Antigravity did not confirm prompt submission.").slice(0, 1000);
   writeJsonFile(statusPath, status);
+}
+
+function updateJobStatus(workspace, jobId, patch = {}) {
+  const statusPath = path.join(jobDirFor(workspace, jobId), "status.json");
+  const status = readJsonFile(statusPath, { jobId });
+  writeJsonFile(statusPath, { ...status, ...patch, updatedAt: utcStamp() });
+}
+
+function truncateText(value, maxChars = 24000) {
+  const text = String(value || "");
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}\n\n[truncated ${text.length - maxChars} chars]`;
+}
+
+function safeClaudeFlag(value, name) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (!/^[A-Za-z0-9._:/@+-]+$/.test(text)) {
+    throw new Error(`Unsafe Claude Code ${name} value. Use a simple model or mode id.`);
+  }
+  return text;
+}
+
+function runClaudeCli(command, args, options = {}) {
+  const safeArgs = args.map((arg) => String(arg));
+  if (process.platform === "win32") {
+    const commandLine = [String(command), ...safeArgs].join(" ");
+    return spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/c", commandLine], {
+      ...options,
+      input: options.input || undefined,
+      encoding: "utf8",
+      timeout: options.timeout || 10000,
+      windowsHide: true,
+    });
+  }
+  return spawnSync(command, safeArgs, {
+    ...options,
+    encoding: "utf8",
+    timeout: options.timeout || 10000,
+    windowsHide: true,
+  });
+}
+
+function commandExists(command) {
+  const result = runClaudeCli(command, ["--version"], { timeout: 10000 });
+  return {
+    ok: result.status === 0,
+    stdout: String(result.stdout || "").trim(),
+    stderr: String(result.stderr || "").trim(),
+    error: result.error?.message || "",
+  };
+}
+
+function findClaudeCode() {
+  const candidates = [];
+  if (process.platform === "win32") {
+    const where = spawnSync("where.exe", ["claude"], { encoding: "utf8", timeout: 10000, windowsHide: true });
+    for (const line of String(where.stdout || "").split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (trimmed) candidates.push(trimmed);
+    }
+    candidates.sort((a, b) => Number(!a.toLowerCase().endsWith(".cmd")) - Number(!b.toLowerCase().endsWith(".cmd")));
+    candidates.push("claude.cmd", "claude");
+  } else {
+    candidates.push("claude");
+  }
+
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const check = commandExists(candidate);
+    if (check.ok) {
+      return { found: true, command: candidate, version: check.stdout || check.stderr };
+    }
+  }
+  return { found: false, command: "", version: "", message: "Claude Code CLI was not found on PATH." };
+}
+
+function getClaudeStatusText() {
+  const status = findClaudeCode();
+  return [
+    "ClaudeCodeStatus:",
+    `Found: ${status.found}`,
+    `Command: ${status.command || "<not found>"}`,
+    `Version: ${status.version || "<unknown>"}`,
+    "SupportedBridge: headless Claude Code CLI via claude -p",
+    "Startup: passive; no Claude job is started by this status check.",
+  ].join("\n");
+}
+
+function buildClaudeJobPrompt(workspace, jobId, args = {}) {
+  const jobDir = jobDirFor(workspace, jobId);
+  const request = summarizeFile(path.join(jobDir, "request.md"), 18000);
+  return [
+    "You are Claude Code running as a local worker for Codex.",
+    "Work in the workspace path below. Inspect files locally; do not paste full files, full logs, screenshots, credentials, cookies, or private chat transcripts.",
+    "",
+    request,
+    "",
+    "Artifact rules:",
+    `- Write the final compact result to: ${path.join(jobDir, "result.md")}`,
+    `- Write changed file paths to: ${path.join(jobDir, "changed-files.txt")}`,
+    `- Write command/test summary only to: ${path.join(jobDir, "test-output-summary.md")}`,
+    "- If blocked, write one concise blocker and the next smallest action.",
+    "- Keep result.md to max 10 bullets.",
+    "",
+    `Current next step: ${String(args.nextStep || "Inspect the relevant files and write compact artifacts.").trim()}`,
+  ].join("\n");
+}
+
+function writeGitArtifacts(workspace, jobDir) {
+  const status = spawnSync("git", ["-C", workspace, "status", "--short"], {
+    encoding: "utf8",
+    timeout: 15000,
+    windowsHide: true,
+  });
+  if (status.status === 0) {
+    const changed = String(status.stdout || "").trim();
+    fs.writeFileSync(path.join(jobDir, "changed-files.txt"), changed ? `${changed}\n` : "NONE\n", "utf8");
+  }
+
+  const diff = spawnSync("git", ["-C", workspace, "diff", "--", "."], {
+    encoding: "utf8",
+    timeout: 30000,
+    maxBuffer: 3 * 1024 * 1024,
+    windowsHide: true,
+  });
+  if (diff.status === 0) {
+    fs.writeFileSync(path.join(jobDir, "diff.patch"), truncateText(diff.stdout || "", 50000), "utf8");
+  }
+}
+
+function runClaudeJobWorker(args = {}) {
+  const workspace = safeWorkspacePath(args.workspace);
+  const jobId = resolveJobId(workspace, args.jobId);
+  const jobDir = jobDirFor(workspace, jobId);
+  const status = findClaudeCode();
+  if (!status.found) {
+    updateJobStatus(workspace, jobId, {
+      state: "failed",
+      currentStep: "claude-code-not-found",
+      blocker: status.message,
+    });
+    return `ClaudeJobWorkerResult:\nJobId: ${jobId}\nState: failed\nBlocker: ${status.message}`;
+  }
+
+  const mode = String(args.mode || "fast").trim().toLowerCase();
+  const permissionMode = safeClaudeFlag(args.permissionMode || (mode === "review" ? "plan" : "acceptEdits"), "permissionMode");
+  const maxMinutes = Math.max(1, Math.min(180, Number(args.maxMinutes || 30)));
+  const prompt = buildClaudeJobPrompt(workspace, jobId, args);
+  const cliArgs = [
+    "-p",
+    "--output-format",
+    "text",
+    "--permission-mode",
+    permissionMode,
+  ];
+  if (args.model) cliArgs.push("--model", safeClaudeFlag(args.model, "model"));
+  if (args.fallbackModel) cliArgs.push("--fallback-model", safeClaudeFlag(args.fallbackModel, "fallbackModel"));
+  if (args.maxBudgetUsd !== undefined && args.maxBudgetUsd !== null && String(args.maxBudgetUsd).trim() !== "") {
+    const budget = Number(args.maxBudgetUsd);
+    if (!Number.isFinite(budget) || budget <= 0) throw new Error("maxBudgetUsd must be a positive number.");
+    cliArgs.push("--max-budget-usd", String(budget));
+  }
+
+  updateJobStatus(workspace, jobId, {
+    state: "running",
+    worker: "claude-code",
+    currentStep: "claude-code-running",
+    startedAt: utcStamp(),
+    claudeCommand: status.command,
+    claudeVersion: status.version,
+    claudeModel: args.model || "",
+    claudePermissionMode: permissionMode,
+  });
+
+  const result = runClaudeCli(status.command, cliArgs, {
+    cwd: workspace,
+    input: prompt,
+    timeout: maxMinutes * 60 * 1000,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+
+  const stdout = String(result.stdout || "");
+  const stderr = String(result.stderr || "");
+  fs.writeFileSync(path.join(jobDir, "claude-output.txt"), truncateText(stdout, 80000), "utf8");
+  fs.writeFileSync(path.join(jobDir, "claude-error.txt"), truncateText(stderr, 30000), "utf8");
+
+  const resultPath = path.join(jobDir, "result.md");
+  if (!fs.existsSync(resultPath) || fs.readFileSync(resultPath, "utf8").trim() === "") {
+    fs.writeFileSync(resultPath, truncateText(stdout || stderr || "<Claude Code produced no output>", 24000), "utf8");
+  }
+
+  const testsPath = path.join(jobDir, "test-output-summary.md");
+  if (!fs.existsSync(testsPath) || fs.readFileSync(testsPath, "utf8").trim() === "") {
+    fs.writeFileSync(
+      testsPath,
+      [
+        `ClaudeCodeExitCode: ${result.status ?? "<unknown>"}`,
+        `TimedOut: ${Boolean(result.error && result.error.code === "ETIMEDOUT")}`,
+        stderr.trim() ? `Stderr: ${truncateText(stderr.trim(), 4000)}` : "Stderr: <empty>",
+      ].join("\n") + "\n",
+      "utf8",
+    );
+  }
+
+  writeGitArtifacts(workspace, jobDir);
+
+  const failed = result.status !== 0 || Boolean(result.error);
+  updateJobStatus(workspace, jobId, {
+    state: failed ? "failed" : "completed",
+    currentStep: failed ? "claude-code-failed" : "claude-code-completed",
+    completedAt: utcStamp(),
+    exitCode: result.status,
+    blocker: failed ? truncateText(result.error?.message || stderr || stdout || "Claude Code exited non-zero.", 1000) : "",
+  });
+
+  return [
+    "ClaudeJobWorkerResult:",
+    `JobId: ${jobId}`,
+    `State: ${failed ? "failed" : "completed"}`,
+    `JobFolder: ${jobDir}`,
+  ].join("\n");
+}
+
+function submitClaudeJob(args = {}) {
+  const created = createJob({ ...args, worker: "claude-code" });
+  const start = args.start !== false;
+  updateJobStatus(created.workspace, created.jobId, {
+    worker: "claude-code",
+    currentStep: start ? "claude-code-queued" : "claude-code-created-not-started",
+  });
+
+  if (!start) {
+    return [
+      "SubmitClaudeJobResult:",
+      `JobId: ${created.jobId}`,
+      `JobFolder: ${created.jobDir}`,
+      "State: queued",
+      "Started: false",
+      "Next: call submit-claude-job again with start=true or run the worker from this job folder.",
+    ].join("\n");
+  }
+
+  const status = findClaudeCode();
+  if (!status.found) {
+    updateJobStatus(created.workspace, created.jobId, {
+      state: "failed",
+      currentStep: "claude-code-not-found",
+      blocker: status.message,
+    });
+    return [
+      "SubmitClaudeJobResult:",
+      `JobId: ${created.jobId}`,
+      `JobFolder: ${created.jobDir}`,
+      "State: failed",
+      `Blocker: ${status.message}`,
+    ].join("\n");
+  }
+
+  const payloadPath = path.join(created.jobDir, "claude-worker-payload.json");
+  writeJsonFile(payloadPath, {
+    ...args,
+    workspace: created.workspace,
+    jobId: created.jobId,
+    model: args.model || args.claudeModel || "sonnet",
+  });
+  const child = spawn(process.execPath, [__filename, "claude-job-worker-cli", "--json-file", payloadPath], {
+    cwd: pluginRoot,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  child.unref();
+
+  updateJobStatus(created.workspace, created.jobId, {
+    state: "running",
+    currentStep: "claude-code-background-started",
+    workerPid: child.pid,
+    claudeCommand: status.command,
+    claudeVersion: status.version,
+  });
+
+  return [
+    "SubmitClaudeJobResult:",
+    `JobId: ${created.jobId}`,
+    `JobFolder: ${created.jobDir}`,
+    "State: running",
+    "Started: true",
+    `WorkerPid: ${child.pid}`,
+    "Next: call read-job with this jobId; Codex should read only compact artifacts.",
+  ].join("\n");
 }
 
 function buildJobHandoff(workspace, jobId) {
@@ -1369,6 +1690,17 @@ async function handleRequest(message) {
         return;
       }
 
+      if (name === "claude-status") {
+        sendResult(id, { content: [{ type: "text", text: getClaudeStatusText() }] });
+        return;
+      }
+
+      if (name === "submit-claude-job") {
+        const text = submitClaudeJob(params?.arguments || {});
+        sendResult(id, { content: [{ type: "text", text }] });
+        return;
+      }
+
       if (name === "list-jobs") {
         const text = listJobs(params?.arguments || {});
         sendResult(id, { content: [{ type: "text", text }] });
@@ -1426,7 +1758,7 @@ async function handleRequest(message) {
   }
 }
 
-if (["submit-offload-cli", "switch-model-cli", "create-job-cli", "submit-job-cli", "list-jobs-cli", "read-job-cli", "cancel-job-cli", "retry-job-cli"].includes(process.argv[2])) {
+if (["submit-offload-cli", "switch-model-cli", "create-job-cli", "submit-job-cli", "claude-status-cli", "submit-claude-job-cli", "claude-job-worker-cli", "list-jobs-cli", "read-job-cli", "cancel-job-cli", "retry-job-cli"].includes(process.argv[2])) {
   let args = {};
   try {
     if (process.argv[3] === "--json-file") {
@@ -1447,6 +1779,9 @@ if (["submit-offload-cli", "switch-model-cli", "create-job-cli", "submit-job-cli
       return `CreateJobResult:\nJobId: ${created.jobId}\nJobFolder: ${created.jobDir}\nState: queued`;
     },
     "submit-job-cli": submitJob,
+    "claude-status-cli": async () => getClaudeStatusText(),
+    "submit-claude-job-cli": async (value) => submitClaudeJob(value),
+    "claude-job-worker-cli": async (value) => runClaudeJobWorker(value),
     "list-jobs-cli": async (value) => listJobs(value),
     "read-job-cli": async (value) => readJob(value),
     "cancel-job-cli": async (value) => cancelJob(value),

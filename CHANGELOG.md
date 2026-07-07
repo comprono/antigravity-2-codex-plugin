@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added optional Claude Code headless bridge support through `claude-status` and `submit-claude-job`.
+- Added PowerShell helper commands for Claude Code bridge jobs with safe defaults and `-Start false` dry-run support.
+- Reused `.antigravity-bridge/jobs/<jobId>/` artifacts for Claude Code so Codex can read the same compact outputs without watching another chat.
 - Hardened selected-chat verification so `expectedChat` must match the active Antigravity document title before model switching or submission.
 - Hardened prompt submission verification so jobs are marked `submit_failed` unless Antigravity actually accepts the prompt.
 - Captured DevTools/no-page submission exceptions into `status.json` instead of leaving bridge jobs stuck in `queued`.
